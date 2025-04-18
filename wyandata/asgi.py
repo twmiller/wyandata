@@ -1,27 +1,23 @@
-"""
-ASGI config for wyandata project.
-
-It exposes the ASGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/5.2/howto/deployment/asgi/
-"""
-
-# your_project/asgi.py
+# wyandata/asgi.py
 
 import os
+import django
 from django.core.asgi import get_asgi_application
+
+# Set up Django first
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'wyandata.settings')
+django.setup()  # Set up Django explicitly before importing our routing
+
+# Import the rest of the modules after Django is properly initialized
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
-import system.routing  # We'll create this next
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'wyandata.settings')
+from system import routing
 
 application = ProtocolTypeRouter({
     "http": get_asgi_application(),
     "websocket": AuthMiddlewareStack(
         URLRouter(
-            system.routing.websocket_urlpatterns
+            routing.websocket_urlpatterns
         )
     ),
 })
