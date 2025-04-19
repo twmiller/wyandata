@@ -5,5 +5,5 @@ from . import views
 
 urlpatterns = [
     path('api/hosts/', views.get_hosts, name='api_hosts'),
-    path('api/hosts/<uuid:host_id>/', views.get_host_details, name='api_host_details'),
+    path('api/hosts/<uuid:host_id>/', views.get_host_metrics, name='api_host_details'),
 ]
