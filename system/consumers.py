@@ -5,6 +5,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.utils import timezone
 from .models import Host, MetricType, MetricValue, StorageDevice, NetworkInterface
+from .db_utils import with_retry
 
 class SystemMetricsConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -131,6 +132,7 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
     
     # Database helper methods
     @database_sync_to_async
+    @with_retry(max_retries=5, retry_delay=0.2)
     def update_host_record(self, hostname, system_info):
         """Create or update a host record"""
         host, created = Host.objects.update_or_create(
