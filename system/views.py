@@ -57,3 +57,52 @@ def get_host_metrics(request, host_id):
         'hostname': host.hostname,
         'metrics': latest_metrics
     })
+# system/views.py - add this function
+
+@api_view(['GET'])
+def get_host_details(request, host_id):
+    """Return detailed information about a specific host"""
+    try:
+        host = Host.objects.get(pk=host_id)
+    except Host.DoesNotExist:
+        return Response({'error': 'Host not found'}, status=404)
+    
+    # Get storage devices for this host
+    storage_devices = []
+    for device in host.storage_devices.all():
+        storage_devices.append({
+            'id': str(device.id),
+            'name': device.name,
+            'device_type': device.device_type,
+            'total_bytes': device.total_bytes,
+        })
+    
+    # Get network interfaces for this host
+    network_interfaces = []
+    for interface in host.network_interfaces.all():
+        network_interfaces.append({
+            'id': str(interface.id),
+            'name': interface.name,
+            'mac_address': interface.mac_address,
+            'ip_address': interface.ip_address,
+            'is_up': interface.is_up,
+        })
+    
+    # Build the detailed response
+    host_details = {
+        'id': str(host.id),
+        'hostname': host.hostname,
+        'system_type': host.system_type,
+        'ip_address': host.ip_address,
+        'cpu_model': host.cpu_model,
+        'cpu_cores': host.cpu_cores,
+        'ram_total': host.ram_total,
+        'gpu_model': host.gpu_model,
+        'os_version': host.os_version,
+        'is_active': host.is_active,
+        'last_seen': host.last_seen.isoformat() if host.last_seen else None,
+        'storage_devices': storage_devices,
+        'network_interfaces': network_interfaces,
+    }
+    
+    return Response(host_details)
