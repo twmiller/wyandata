@@ -8,4 +8,7 @@ django-cors-headers>=4.3.0
 # PostgreSQL adapter
 psycopg2-binary>=2.9.9
 
+# Solar controller components
+pymodbus>=3.5.0
+
 # Other dependencies may be listed here
