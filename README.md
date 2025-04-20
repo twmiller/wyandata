@@ -43,6 +43,8 @@ Connect to real-time updates via WebSocket:
 ws://server:8000/ws/solar/data/
 ```
 
+Note: The WebSocket path must match exactly as `/ws/solar/data/` (with trailing slash).
+
 ### Setting Up the Solar Monitor Client
 
 1. Install required dependencies:
