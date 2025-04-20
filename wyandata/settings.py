@@ -107,17 +107,19 @@ WSGI_APPLICATION = 'wyandata.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Database configuration with connection pooling and timeout settings
+# Database configuration with PostgreSQL
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-        'ATOMIC_REQUESTS': False,  # Disable atomic requests for better concurrency
-        'OPTIONS': {
-            'timeout': 30,  # Increase SQLite timeout (in seconds)
-            'isolation_level': None,  # Let Django manage transactions
-        },
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'wyandata',
+        'USER': 'postgres',
+        'PASSWORD': 'postgres',  # Change this to a secure password
+        'HOST': 'localhost',
+        'PORT': '5432',
         'CONN_MAX_AGE': 600,  # Connection pooling: keep connections open for 10 minutes
+        'OPTIONS': {
+            'connect_timeout': 10,
+        },
     }
 }
 

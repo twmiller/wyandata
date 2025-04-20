@@ -8,3 +8,6 @@ msgpack==1.1.0
 paho-mqtt==2.1.0
 redis==5.2.1
 sqlparse==0.5.3
+
+# PostgreSQL adapter
+psycopg2-binary>=2.9.9
