@@ -1,17 +1,17 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from datetime import timedelta
-from system.tasks import cleanup_old_system_data
+from system.tasks import cleanup_old_system_metrics
 
 class Command(BaseCommand):
-    help = 'Cleans up old system monitoring data'
+    help = 'Cleans up old system monitoring metrics data'
     
     def add_arguments(self, parser):
         parser.add_argument(
-            '--days',
+            '--hours',
             type=int,
-            default=7,
-            help='Delete data older than this many days (default: 7)',
+            default=6,
+            help='Delete metrics data older than this many hours (default: 6)',
         )
         
         parser.add_argument(
@@ -21,11 +21,11 @@ class Command(BaseCommand):
         )
     
     def handle(self, *args, **options):
-        days = options['days']
+        hours = options['hours']
         dry_run = options['dry_run']
         
         # Calculate the cutoff date
-        cutoff_date = timezone.now() - timedelta(days=days)
+        cutoff_date = timezone.now() - timedelta(hours=hours)
         
         if dry_run:
             from system.models import SystemMetrics, ProcessMetrics, NetworkMetrics
@@ -35,14 +35,16 @@ class Command(BaseCommand):
             total_count = system_count + process_count + network_count
             
             self.stdout.write(
-                self.style.WARNING(f'Would delete {total_count} records older than {cutoff_date.strftime("%Y-%m-%d")}:')
+                self.style.WARNING(f'Would delete {total_count} metric records older than {cutoff_date.strftime("%Y-%m-%d %H:%M:%S")}:')
             )
             self.stdout.write(self.style.WARNING(f'  - {system_count} system metrics records'))
             self.stdout.write(self.style.WARNING(f'  - {process_count} process metrics records'))
             self.stdout.write(self.style.WARNING(f'  - {network_count} network metrics records'))
+            self.stdout.write(self.style.SUCCESS('System identification records would remain intact.'))
         else:
             # Execute the cleanup
-            count = cleanup_old_system_data(days)
+            count = cleanup_old_system_metrics(hours)
             self.stdout.write(
-                self.style.SUCCESS(f'Successfully deleted {count} system monitoring records older than {cutoff_date.strftime("%Y-%m-%d")}')
+                self.style.SUCCESS(f'Successfully deleted {count} system metrics records older than {cutoff_date.strftime("%Y-%m-%d %H:%M:%S")}')
             )
+            self.stdout.write(self.style.SUCCESS('System identification records remain intact.'))

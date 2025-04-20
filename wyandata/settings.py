@@ -194,9 +194,9 @@ CORS_ALLOW_HEADERS = [
 
 # Define cron jobs for automatic data cleanup
 CRONJOBS = [
-    # Run solar data cleanup at 2:00 AM every day
+    # Run solar data cleanup at 2:00 AM every day (keep 7 days of data)
     ('0 2 * * *', 'solar.tasks.cleanup_old_solar_data', [7]),
     
-    # Run system monitoring data cleanup at 3:00 AM every day
-    ('0 3 * * *', 'system.tasks.cleanup_old_system_data', [7]),
+    # Run system metrics cleanup every 2 hours (keep only 6 hours of metrics data)
+    ('0 */2 * * *', 'system.tasks.cleanup_old_system_metrics', [6]),
 ]
