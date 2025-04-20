@@ -22,4 +22,5 @@ urlpatterns = [
     path('api/', include('api.urls')),
     path('', include('dashboard.urls')),
     path('system/', include('system.urls')),
+    path('solar/', include('solar.urls')),
 ]

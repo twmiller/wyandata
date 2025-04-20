@@ -1,7 +1,8 @@
 from django.shortcuts import render
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from django.utils import timezone
 from datetime import timedelta
 
@@ -76,3 +77,46 @@ class SolarDataViewSet(viewsets.ViewSet):
             return Response({"error": "Could not connect to controller"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         
         return Response(data)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])  # For internal network use only
+def solar_data_upload(request):
+    """
+    Endpoint to receive solar controller data from external scripts
+    """
+    try:
+        data = request.data
+        
+        # Extract the data we need for our model
+        controller_data = {}
+        
+        # Process controller info
+        if 'controller_info' in data:
+            for key, info in data['controller_info'].items():
+                controller_data[key] = info['value']
+        
+        # Process real-time data
+        if 'real_time_data' in data:
+            for key, info in data['real_time_data'].items():
+                controller_data[key] = info['value']
+        
+        # Process settings
+        if 'settings' in data:
+            for key, info in data['settings'].items():
+                controller_data[key] = info['value']
+        
+        # Create and save the model
+        solar_data = SolarControllerData(**controller_data)
+        solar_data.save()
+        
+        return Response({
+            "status": "success", 
+            "message": "Solar data saved",
+            "timestamp": solar_data.timestamp
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        return Response({
+            "status": "error", 
+            "message": str(e)
+        }, status=status.HTTP_400_BAD_REQUEST)
