@@ -36,6 +36,12 @@ class SolarDataConsumer(AsyncWebsocketConsumer):
             if not latest:
                 return None
                 
+            # Ensure charging_mode is consistently a string
+            charging_mode = latest.charging_mode
+            if charging_mode is not None:
+                if isinstance(charging_mode, (int, float)):
+                    charging_mode = str(charging_mode)
+            
             return {
                 "timestamp": latest.timestamp.isoformat(),
                 "pv_array": {
@@ -56,7 +62,7 @@ class SolarDataConsumer(AsyncWebsocketConsumer):
                 },
                 "controller": {
                     "temperature": latest.controller_temp,
-                    "charging_mode": latest.charging_mode
+                    "charging_mode": charging_mode
                 }
             }
         except Exception as e:

@@ -9,7 +9,7 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 import json
 
-from .models import SolarControllerData
+from .models import SolarControllerData, SolarDailyAggregate, SolarMonthlyAggregate, SolarYearlyAggregate, SolarTotalAggregate
 from .utils import get_solar_data
 
 # REST API ViewSet for retrieving solar data
@@ -111,6 +111,102 @@ class SolarDataViewSet(viewsets.ReadOnlyModelViewSet):
         
         return Response(stats)
     
+    @action(detail=False, methods=['get'])
+    def daily_stats(self, request):
+        """Get daily aggregated solar stats"""
+        days = int(request.query_params.get('days', 30))
+        since = timezone.now().date() - timedelta(days=days)
+        
+        daily_stats = SolarDailyAggregate.objects.filter(date__gte=since)
+        
+        data = {
+            "dates": [],
+            "energy_produced": [],
+            "energy_consumed": [],
+            "peak_power": [],
+            "sunshine_hours": []
+        }
+        
+        for stat in daily_stats:
+            data["dates"].append(stat.date.isoformat())
+            data["energy_produced"].append(stat.energy_produced)
+            data["energy_consumed"].append(stat.energy_consumed)
+            data["peak_power"].append(stat.peak_power)
+            data["sunshine_hours"].append(stat.sunshine_hours)
+        
+        return Response(data)
+
+    @action(detail=False, methods=['get'])
+    def monthly_stats(self, request):
+        """Get monthly aggregated solar stats"""
+        months = int(request.query_params.get('months', 12))
+        
+        # Get the most recent months
+        monthly_stats = SolarMonthlyAggregate.objects.all()[:months]
+        
+        data = {
+            "periods": [],
+            "energy_produced": [],
+            "energy_consumed": [],
+            "avg_daily_production": []
+        }
+        
+        for stat in monthly_stats:
+            data["periods"].append(f"{stat.year}-{stat.month:02d}")
+            data["energy_produced"].append(stat.energy_produced)
+            data["energy_consumed"].append(stat.energy_consumed)
+            data["avg_daily_production"].append(stat.avg_daily_production)
+        
+        return Response(data)
+
+    @action(detail=False, methods=['get'])
+    def yearly_stats(self, request):
+        """Get yearly aggregated solar stats"""
+        yearly_stats = SolarYearlyAggregate.objects.all()
+        
+        data = {
+            "years": [],
+            "energy_produced": [],
+            "energy_consumed": [],
+            "best_months": []
+        }
+        
+        for stat in yearly_stats:
+            data["years"].append(stat.year)
+            data["energy_produced"].append(stat.energy_produced)
+            data["energy_consumed"].append(stat.energy_consumed)
+            if stat.best_month:
+                data["best_months"].append(f"{stat.year}-{stat.best_month:02d}")
+            else:
+                data["best_months"].append(None)
+        
+        return Response(data)
+
+    @action(detail=False, methods=['get'])
+    def lifetime_stats(self, request):
+        """Get lifetime solar production stats"""
+        try:
+            stats = SolarTotalAggregate.objects.first()
+            if not stats:
+                return Response({"error": "No lifetime stats available yet"}, status=status.HTTP_404_NOT_FOUND)
+                
+            data = {
+                "total_energy_produced": stats.total_energy_produced,
+                "total_energy_consumed": stats.total_energy_consumed,
+                "peak_power_ever": stats.peak_power_ever,
+                "peak_power_date": stats.peak_power_date,
+                "best_day_ever": stats.best_day_ever,
+                "best_day_production": stats.best_day_production,
+                "best_month_ever": stats.best_month_ever,
+                "best_month_production": stats.best_month_production,
+                "operational_days": stats.operational_days,
+                "system_install_date": stats.system_install_date
+            }
+            
+            return Response(data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
     def format_solar_data(self, data_point):
         """Format a solar data point for API response"""
         return {
@@ -206,7 +302,8 @@ def solar_data_upload(request):
             },
             "controller": {
                 "temperature": solar_data.controller_temp,
-                "charging_mode": solar_data.charging_mode
+                # Ensure charging_mode is consistently a string
+                "charging_mode": str(solar_data.charging_mode) if solar_data.charging_mode is not None else None
             }
         }
         

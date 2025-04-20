@@ -34,6 +34,10 @@ The solar module interfaces with an Epever Tracer4210AN solar charge controller 
 - `GET /solar/data/` - Retrieve the latest solar controller data
 - `GET /solar/data/history/` - Get historical data (with parameters `hours` and `interval`)
 - `GET /solar/data/stats/` - Get statistics about solar production and battery state
+- `GET /solar/data/daily_stats/` - Get daily aggregated statistics (energy production, peaks)
+- `GET /solar/data/monthly_stats/` - Get monthly aggregated statistics
+- `GET /solar/data/yearly_stats/` - Get yearly aggregated statistics
+- `GET /solar/data/lifetime_stats/` - Get lifetime solar production statistics
 - `POST /solar/upload/` - Upload new controller data (used by the client script)
 
 ### WebSockets
@@ -44,6 +48,37 @@ ws://server:8000/ws/solar/data/
 ```
 
 Note: The WebSocket path must match exactly as `/ws/solar/data/` (with trailing slash).
+
+#### WebSocket Data Format
+
+The WebSocket sends JSON data with the following structure:
+```json
+{
+  "timestamp": "2025-04-20T18:23:42.428584+00:00",
+  "pv_array": {
+    "voltage": 37.34,
+    "current": 2.44,
+    "power": 90.92
+  },
+  "battery": {
+    "voltage": 13.84,
+    "charging_current": 6.58,
+    "charging_power": 91.34,
+    "temperature": 25.0
+  },
+  "load": {
+    "voltage": 13.84,
+    "current": 0.0,
+    "power": 0.0
+  },
+  "controller": {
+    "temperature": 21.97,
+    "charging_mode": "2.0"
+  }
+}
+```
+
+All values are numeric except for `timestamp` (ISO format) and `charging_mode` (string).
 
 ### Setting Up the Solar Monitor Client
 
