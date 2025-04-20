@@ -112,8 +112,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'wyandata',
-        'USER': 'postgres',
-        'PASSWORD': 'postgres',  # Change this to a secure password
+        'USER': 'wyanuser',
+        'PASSWORD': 'm1st3r_pl0ppy',        
         'HOST': 'localhost',
         'PORT': '5432',
         'CONN_MAX_AGE': 600,  # Connection pooling: keep connections open for 10 minutes

@@ -1,13 +1,11 @@
-asgiref==3.8.1
-channels==4.2.2
-channels_redis==4.2.1
-Django==5.2
-django-cors-headers==4.7.0
-djangorestframework==3.16.0
-msgpack==1.1.0
-paho-mqtt==2.1.0
-redis==5.2.1
-sqlparse==0.5.3
+# Django and core packages
+Django>=5.2
+djangorestframework>=3.14.0
+channels>=4.0.0
+channels-redis>=4.1.0
+django-cors-headers>=4.3.0
 
 # PostgreSQL adapter
 psycopg2-binary>=2.9.9
+
+# Other dependencies may be listed here
