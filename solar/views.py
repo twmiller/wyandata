@@ -120,3 +120,34 @@ def solar_data_upload(request):
             "status": "error", 
             "message": str(e)
         }, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])  # For internal network use only
+def cleanup_solar_data(request):
+    """
+    Endpoint to clean up old solar controller data
+    """
+    try:
+        # Default to 7 days if not specified
+        days = int(request.data.get('days', 7))
+        
+        # Calculate the cutoff date
+        cutoff_date = timezone.now() - timedelta(days=days)
+        
+        # Delete old records
+        old_records = SolarControllerData.objects.filter(timestamp__lt=cutoff_date)
+        count = old_records.count()
+        old_records.delete()
+        
+        return Response({
+            "status": "success", 
+            "message": f"Deleted {count} records older than {cutoff_date.strftime('%Y-%m-%d')}",
+            "deleted_count": count,
+            "cutoff_date": cutoff_date
+        })
+        
+    except Exception as e:
+        return Response({
+            "status": "error", 
+            "message": str(e)
+        }, status=status.HTTP_400_BAD_REQUEST)

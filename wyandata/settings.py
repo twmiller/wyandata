@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'channels',
     'corsheaders',
+    'django_crontab',
     
     # Local apps
     'api.apps.ApiConfig',  # Use the full path to include the AppConfig
@@ -189,4 +190,10 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+]
+
+# Define cron jobs
+CRONJOBS = [
+    # Run cleanup at 3:00 AM every day
+    ('0 3 * * *', 'solar.tasks.cleanup_old_solar_data', [7]),
 ]
