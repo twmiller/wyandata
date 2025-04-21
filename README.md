@@ -163,3 +163,167 @@ WantedBy=multi-user.target
 
 The system automatically cleans up older solar data, keeping 7 days of historical information. This cleanup happens once per day at 2:00 AM.
 
+## System Module
+
+### Overview
+
+The system module monitors and collects metrics from various hosts in your infrastructure, providing real-time system information through both REST API and WebSockets.
+
+### Components
+
+1. **System Metrics Collection**:
+   - Collects metrics from various hosts in your infrastructure
+   - Tracks CPU, memory, disk, and network usage
+   - Records system information and status
+
+2. **Django System App**:
+   - Stores system metrics in a PostgreSQL database
+   - Provides REST API endpoints for data access
+   - Offers WebSocket connections for real-time updates
+   - Automatically cleans up old data (keeps 6 hours of metrics)
+
+### API Endpoints
+
+- `GET /system/api/hosts/` - List all registered hosts
+  ```json
+  [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "hostname": "webserver01",
+      "system_type": "LINUX",
+      "ip_address": "192.168.1.100",
+      "is_active": true,
+      "last_seen": "2025-04-20T18:45:22.428584+00:00"
+    },
+    {
+      "id": "9d7af3fa-71c5-4049-a9c9-3c78566e9821",
+      "hostname": "dbserver01",
+      "system_type": "LINUX",
+      "ip_address": "192.168.1.101",
+      "is_active": true,
+      "last_seen": "2025-04-20T18:42:10.254871+00:00"
+    }
+  ]
+  ```
+  *Lists all hosts being monitored, including their basic information and online status.*
+
+- `GET /system/api/hosts/{host_id}/` - Get detailed information about a host
+  ```json
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "hostname": "webserver01",
+    "system_type": "LINUX",
+    "ip_address": "192.168.1.100",
+    "cpu_model": "Intel(R) Xeon(R) CPU E5-2680 v4",
+    "cpu_cores": 8,
+    "ram_total": 16106127360,
+    "gpu_model": "",
+    "os_version": "Ubuntu 22.04.3 LTS",
+    "is_active": true,
+    "last_seen": "2025-04-20T18:45:22.428584+00:00",
+    "storage_devices": [
+      {
+        "id": "1b19b7fe-9933-4f53-a95c-dd448b8231b7",
+        "name": "/dev/sda1",
+        "device_type": "SSD",
+        "total_bytes": 500107862016
+      }
+    ],
+    "network_interfaces": [
+      {
+        "id": "94f2ba3a-d54e-4647-bb8d-7ed15b62123c",
+        "name": "eth0",
+        "mac_address": "00:1B:44:11:3A:B7",
+        "ip_address": "192.168.1.100",
+        "is_up": true
+      }
+    ]
+  }
+  ```
+  *Provides comprehensive details about a specific host, including hardware, OS, storage, and network information.*
+
+- `GET /system/api/hosts/{host_id}/metrics/` - Get the latest metrics for a host
+  ```json
+  {
+    "host_id": "550e8400-e29b-41d4-a716-446655440000",
+    "hostname": "webserver01",
+    "metrics": {
+      "cpu_usage": {
+        "value": 23.5,
+        "unit": "%",
+        "timestamp": "2025-04-20T18:45:22.428584+00:00",
+        "category": "CPU"
+      },
+      "memory_used": {
+        "value": 8487240704,
+        "unit": "bytes",
+        "timestamp": "2025-04-20T18:45:22.428584+00:00",
+        "category": "MEMORY"
+      },
+      "disk_usage_root": {
+        "value": 68.2,
+        "unit": "%",
+        "timestamp": "2025-04-20T18:45:22.428584+00:00",
+        "category": "STORAGE"
+      },
+      "system_temperature": {
+        "value": 45.7,
+        "unit": "°C",
+        "timestamp": "2025-04-20T18:45:22.428584+00:00",
+        "category": "TEMPERATURE"
+      }
+    }
+  }
+  ```
+  *Returns the most recent metrics data collected for a specific host, including CPU, memory, disk usage, and other monitored metrics.*
+
+### WebSockets
+
+Connect to real-time updates via WebSocket:
+```
+ws://server:8000/ws/system/data/
+```
+
+Note: The WebSocket path must match exactly as `/ws/system/data/` (with trailing slash).
+
+#### WebSocket Data Format
+
+The WebSocket sends JSON data with the following structure:
+```json
+{
+  "timestamp": "2025-04-20T18:45:22.428584+00:00",
+  "metrics": {
+    "cpu_usage": {
+      "value": 23.5,
+      "unit": "%",
+      "timestamp": "2025-04-20T18:45:22.428584+00:00",
+      "category": "CPU"
+    },
+    "memory_used": {
+      "value": 8487240704,
+      "unit": "bytes",
+      "timestamp": "2025-04-20T18:45:22.428584+00:00",
+      "category": "MEMORY"
+    },
+    "disk_usage_root": {
+      "value": 68.2,
+      "unit": "%",
+      "timestamp": "2025-04-20T18:45:22.428584+00:00",
+      "category": "STORAGE"
+    },
+    "system_temperature": {
+      "value": 45.7,
+      "unit": "°C",
+      "timestamp": "2025-04-20T18:45:22.428584+00:00",
+      "category": "TEMPERATURE"
+    }
+  }
+}
+```
+
+All values are numeric except for `timestamp` (ISO format) and `category` (string).
+
+### Data Retention
+
+The system automatically cleans up older system metrics, keeping 6 hours of historical information. This cleanup happens once per hour.
+
