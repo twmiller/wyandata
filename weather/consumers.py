@@ -1,7 +1,6 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from asgiref.sync import async_to_sync
 from .models import OutdoorWeatherReading, IndoorSensor
 
 class WeatherDataConsumer(AsyncWebsocketConsumer):
