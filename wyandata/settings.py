@@ -203,4 +203,10 @@ CRONJOBS = [
     
     # Run system metrics cleanup every 2 hours (keep only 6 hours of metrics data)
     ('0 */2 * * *', 'system.tasks.cleanup_old_system_metrics', [6]),
+    
+    # Generate weather summaries at 12:05 AM every day
+    ('5 0 * * *', 'django.core.management.call_command', ['generate_weather_summaries']),
+    
+    # Clean up old weather data at 3:15 AM every day (keep 7 days of raw data)
+    ('15 3 * * *', 'django.core.management.call_command', ['cleanup_weather_data']),
 ]

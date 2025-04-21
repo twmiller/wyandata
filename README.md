@@ -181,9 +181,142 @@ Endpoint to retrieve monthly weather statistics.
 }
 ```
 
+**5. Get Recent Weather Readings**
+
+Endpoint to retrieve a specific number of recent weather readings.
+
+- URL: `/api/weather/recent/`
+- Method: `GET`
+- Query Parameters:
+  - `count`: Number of readings to retrieve (default: 100, max: 1000)
+  - `sensor_id`: Optional filter for a specific sensor
+- Example response:
+```json
+{
+  "status": "success",
+  "count": 100,
+  "time_info": {
+    "start_time": "2025-04-21T10:00:00-06:00",
+    "end_time": "2025-04-21T14:03:12-06:00",
+    "duration_seconds": 14592,
+    "duration_minutes": 243.2,
+    "duration_hours": 4.05
+  },
+  "readings": [
+    {
+      "timestamp": "2025-04-21T14:03:12-06:00",
+      "model": "Fineoffset-WH24",
+      "sensor_id": 182,
+      "temperature": {
+        "celsius": 5.5,
+        "fahrenheit": 41.9
+      },
+      "humidity": 63,
+      "wind": {
+        "direction_degrees": 38,
+        "direction_cardinal": "NE",
+        "speed": {
+          "avg_m_s": 0.0,
+          "avg_mph": 0.0,
+          "max_m_s": 0.0,
+          "max_mph": 0.0
+        }
+      },
+      "rain": {
+        "total_mm": 1461.3,
+        "total_inches": 57.53,
+        "since_previous_inches": 0.06
+      },
+      "uv": 83,
+      "uvi": 0,
+      "light_lux": 10602.0
+    },
+    // Additional readings...
+  ]
+}
+```
+
+### WebSockets
+
+Connect to real-time weather updates via WebSocket:
+```
+ws://server:8000/ws/weather/data/
+```
+
+Note: The WebSocket path must match exactly as `/ws/weather/data/` (with trailing slash).
+
+#### WebSocket Data Format
+
+The WebSocket sends JSON data with the following structure:
+```json
+{
+  "timestamp": "2025-04-21T13:34:47-06:00",
+  "outdoor": {
+    "model": "Fineoffset-WH24",
+    "sensor_id": 182,
+    "temperature": {
+      "celsius": 5.5,
+      "fahrenheit": 41.9
+    },
+    "humidity": 63,
+    "wind": {
+      "direction_degrees": 38,
+      "direction_cardinal": "NE",
+      "speed": {
+        "avg_m_s": 0.0,
+        "avg_mph": 0.0,
+        "max_m_s": 0.0,
+        "max_mph": 0.0
+      }
+    },
+    "rain": {
+      "total_mm": 1461.3,
+      "total_inches": 57.53,
+      "since_previous_inches": 0.06
+    },
+    "uv": 83,
+    "uvi": 0,
+    "light_lux": 10602.0
+  },
+  "indoor": {
+    "model": "Fineoffset-WN32P",
+    "sensor_id": 105,
+    "temperature": {
+      "celsius": 21.8,
+      "fahrenheit": 71.2
+    },
+    "humidity": 42,
+    "timestamp": "2025-04-21T14:03:12-06:00"
+  }
+}
+```
+
+All values are consistent with the REST API format, using the same structure for measurements.
+
+### Data Retention
+
+The weather app implements the following data retention policies:
+
+- **Raw Weather Readings**: 7 days of detailed sensor data (approx. 15-30 second intervals)
+- **Daily Summaries**: Permanently stored (minimal storage requirements)
+- **Monthly Summaries**: Permanently stored (minimal storage requirements)
+
+To clean up old weather data manually, run:
+
+```bash
+# Clean up data older than 7 days (default)
+python manage.py cleanup_weather_data
+
+# Clean up data older than a specific number of days
+python manage.py cleanup_weather_data --days=14
+
+# Perform a dry run to see what would be deleted
+python manage.py cleanup_weather_data --dry-run
+```
+
 ### Weather Data Updates
 
-To generate daily and monthly weather summaries, run:
+To generate daily and monthly weather summaries manually, run:
 
 ```bash
 # Process the last 7 days (default)
@@ -196,12 +329,24 @@ python manage.py generate_weather_summaries --days=30
 python manage.py generate_weather_summaries --regenerate
 ```
 
-For automatic updates, add a cron job to run this command daily:
+### Scheduled Tasks
+
+The application uses django-crontab for scheduling regular tasks:
 
 ```bash
-# Run daily at 12:05 AM
-5 0 * * * cd /path/to/wyandata && python manage.py generate_weather_summaries
+# List all configured cron jobs
+python manage.py crontab show
+
+# Add all configured cron jobs
+python manage.py crontab add
+
+# Remove all cron jobs
+python manage.py crontab remove
 ```
+
+The following cron jobs are configured:
+- Generate weather summaries (daily at 12:05 AM)
+- Clean up old weather data (daily at 3:15 AM, keeping 7 days of raw data)
 
 ### Solar
 

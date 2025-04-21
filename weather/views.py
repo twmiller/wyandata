@@ -6,6 +6,8 @@ import json
 from datetime import datetime, timedelta, date
 from django.utils import timezone
 import pytz
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 def weather_dashboard(request):
     """View to display the latest weather data"""
@@ -65,6 +67,72 @@ def receive_weather_data(request):
                 )
                 reading.save()
                 
+                # Send update to WebSocket
+                channel_layer = get_channel_layer()
+                
+                # Check if we have an indoor sensor reading
+                indoor_reading = IndoorSensor.objects.order_by('-time').first()
+                
+                # Prepare WebSocket data
+                ws_data = {
+                    "timestamp": reading.time.isoformat(),
+                    "outdoor": {
+                        "model": reading.model,
+                        "sensor_id": reading.sensor_id,
+                        "temperature": {
+                            "celsius": reading.temperature_C,
+                            "fahrenheit": reading.temperature_F
+                        },
+                        "humidity": reading.humidity,
+                        "wind": {
+                            "direction_degrees": reading.wind_dir_deg,
+                            "direction_cardinal": reading.wind_direction_cardinal,
+                            "speed": {
+                                "avg_m_s": reading.wind_avg_m_s,
+                                "avg_mph": reading.wind_avg_mph,
+                                "max_m_s": reading.wind_max_m_s,
+                                "max_mph": reading.wind_max_mph
+                            }
+                        },
+                        "rain": {
+                            "total_mm": reading.rain_mm,
+                            "total_inches": reading.rain_inches,
+                            "since_previous_inches": reading.rainfall_since_previous
+                        }
+                    }
+                }
+                
+                # Add UV and light data if available
+                if reading.uv is not None:
+                    ws_data['outdoor']['uv'] = reading.uv
+                
+                if reading.uvi is not None:
+                    ws_data['outdoor']['uvi'] = reading.uvi
+                    
+                if reading.light_lux is not None:
+                    ws_data['outdoor']['light_lux'] = reading.light_lux
+                
+                # Add indoor data if available
+                if indoor_reading:
+                    ws_data['indoor'] = {
+                        "model": indoor_reading.model,
+                        "sensor_id": indoor_reading.sensor_id,
+                        "temperature": {
+                            "celsius": indoor_reading.temperature_C,
+                            "fahrenheit": indoor_reading.temperature_F
+                        },
+                        "humidity": indoor_reading.humidity,
+                        "timestamp": indoor_reading.time.isoformat()
+                    }
+                
+                async_to_sync(channel_layer.group_send)(
+                    "weather_data",
+                    {
+                        "type": "weather_update",
+                        "data": ws_data
+                    }
+                )
+                
             elif 'WN32P' in model:
                 # Create indoor sensor reading
                 reading = IndoorSensor(
@@ -79,6 +147,70 @@ def receive_weather_data(request):
                 )
                 reading.save()
                 
+                # Get the latest outdoor reading
+                outdoor_reading = OutdoorWeatherReading.objects.order_by('-time').first()
+                
+                # Only send WebSocket update if we have both indoor and outdoor readings
+                if outdoor_reading:
+                    channel_layer = get_channel_layer()
+                    
+                    # Prepare WebSocket data
+                    ws_data = {
+                        "timestamp": outdoor_reading.time.isoformat(),
+                        "outdoor": {
+                            "model": outdoor_reading.model,
+                            "sensor_id": outdoor_reading.sensor_id,
+                            "temperature": {
+                                "celsius": outdoor_reading.temperature_C,
+                                "fahrenheit": outdoor_reading.temperature_F
+                            },
+                            "humidity": outdoor_reading.humidity,
+                            "wind": {
+                                "direction_degrees": outdoor_reading.wind_dir_deg,
+                                "direction_cardinal": outdoor_reading.wind_direction_cardinal,
+                                "speed": {
+                                    "avg_m_s": outdoor_reading.wind_avg_m_s,
+                                    "avg_mph": outdoor_reading.wind_avg_mph,
+                                    "max_m_s": outdoor_reading.wind_max_m_s,
+                                    "max_mph": outdoor_reading.wind_max_mph
+                                }
+                            },
+                            "rain": {
+                                "total_mm": outdoor_reading.rain_mm,
+                                "total_inches": outdoor_reading.rain_inches,
+                                "since_previous_inches": outdoor_reading.rainfall_since_previous
+                            }
+                        },
+                        "indoor": {
+                            "model": reading.model,
+                            "sensor_id": reading.sensor_id,
+                            "temperature": {
+                                "celsius": reading.temperature_C,
+                                "fahrenheit": reading.temperature_F
+                            },
+                            "humidity": reading.humidity,
+                            "timestamp": reading.time.isoformat()
+                        }
+                    }
+                    
+                    # Add UV and light data if available
+                    if outdoor_reading.uv is not None:
+                        ws_data['outdoor']['uv'] = outdoor_reading.uv
+                    
+                    if outdoor_reading.uvi is not None:
+                        ws_data['outdoor']['uvi'] = outdoor_reading.uvi
+                        
+                    if outdoor_reading.light_lux is not None:
+                        ws_data['outdoor']['light_lux'] = outdoor_reading.light_lux
+                    
+                    async_to_sync(channel_layer.group_send)(
+                        "weather_data",
+                        {
+                            "type": "weather_update",
+                            "data": ws_data
+                        }
+                    )
+                    
             return JsonResponse({'status': 'success'})
             
         except Exception as e:
@@ -249,6 +381,85 @@ def get_monthly_weather(request):
             })
         
         return JsonResponse({'status': 'success', 'months': len(results), 'summaries': results})
+        
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+def get_recent_readings(request):
+    """API endpoint to get a specified number of recent weather readings"""
+    try:
+        # Get query parameters
+        count = int(request.GET.get('count', 100))  # Default to 100 readings
+        count = min(count, 1000)  # Limit to reasonable amount
+        
+        # Get sensor_id if specified to filter by a specific sensor
+        sensor_id = request.GET.get('sensor_id', None)
+        
+        # Get most recent readings
+        query = OutdoorWeatherReading.objects.order_by('-time')
+        
+        # Filter by sensor_id if provided
+        if sensor_id:
+            try:
+                sensor_id = int(sensor_id)
+                query = query.filter(sensor_id=sensor_id)
+            except ValueError:
+                return JsonResponse({'status': 'error', 'message': 'Invalid sensor_id'}, status=400)
+                
+        readings = query[:count]
+        
+        # Format the response data
+        results = []
+        for reading in readings:
+            results.append({
+                'timestamp': reading.time.isoformat(),
+                'model': reading.model,
+                'sensor_id': reading.sensor_id,
+                'temperature': {
+                    'celsius': reading.temperature_C,
+                    'fahrenheit': reading.temperature_F
+                },
+                'humidity': reading.humidity,
+                'wind': {
+                    'direction_degrees': reading.wind_dir_deg,
+                    'direction_cardinal': reading.wind_direction_cardinal,
+                    'speed': {
+                        'avg_m_s': reading.wind_avg_m_s,
+                        'avg_mph': reading.wind_avg_mph,
+                        'max_m_s': reading.wind_max_m_s,
+                        'max_mph': reading.wind_max_mph
+                    }
+                },
+                'rain': {
+                    'total_mm': reading.rain_mm,
+                    'total_inches': reading.rain_inches,
+                    'since_previous_inches': reading.rainfall_since_previous
+                },
+                'uv': reading.uv,
+                'uvi': reading.uvi,
+                'light_lux': reading.light_lux
+            })
+        
+        # Include time interval information
+        time_info = {}
+        if len(readings) >= 2:
+            start_time = readings.last().time
+            end_time = readings.first().time
+            duration = end_time - start_time
+            time_info = {
+                'start_time': start_time.isoformat(),
+                'end_time': end_time.isoformat(),
+                'duration_seconds': duration.total_seconds(),
+                'duration_minutes': duration.total_seconds() / 60,
+                'duration_hours': duration.total_seconds() / 3600
+            }
+        
+        return JsonResponse({
+            'status': 'success', 
+            'count': len(results),
+            'time_info': time_info,
+            'readings': results
+        })
         
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
