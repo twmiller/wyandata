@@ -405,61 +405,72 @@ def get_recent_readings(request):
                 query = query.filter(sensor_id=sensor_id)
             except ValueError:
                 return JsonResponse({'status': 'error', 'message': 'Invalid sensor_id'}, status=400)
-                
-        readings = query[:count]
         
-        # Format the response data
-        results = []
-        for reading in readings:
-            results.append({
-                'timestamp': reading.time.isoformat(),
-                'model': reading.model,
-                'sensor_id': reading.sensor_id,
-                'temperature': {
-                    'celsius': reading.temperature_C,
-                    'fahrenheit': reading.temperature_F
-                },
-                'humidity': reading.humidity,
-                'wind': {
-                    'direction_degrees': reading.wind_dir_deg,
-                    'direction_cardinal': reading.wind_direction_cardinal,
-                    'speed': {
-                        'avg_m_s': reading.wind_avg_m_s,
-                        'avg_mph': reading.wind_avg_mph,
-                        'max_m_s': reading.wind_max_m_s,
-                        'max_mph': reading.wind_max_mph
-                    }
-                },
-                'rain': {
-                    'total_mm': reading.rain_mm,
-                    'total_inches': reading.rain_inches,
-                    'since_previous_inches': reading.rainfall_since_previous
-                },
-                'uv': reading.uv,
-                'uvi': reading.uvi,
-                'light_lux': reading.light_lux
+        # Get all readings first to calculate time range before slicing
+        if query.exists():
+            start_time = query.order_by('time').first().time
+            end_time = query.order_by('-time').first().time
+            
+            # Now get the sliced readings
+            readings = query[:count]
+            
+            # Format the response data
+            results = []
+            for reading in readings:
+                results.append({
+                    'timestamp': reading.time.isoformat(),
+                    'model': reading.model,
+                    'sensor_id': reading.sensor_id,
+                    'temperature': {
+                        'celsius': reading.temperature_C,
+                        'fahrenheit': reading.temperature_F
+                    },
+                    'humidity': reading.humidity,
+                    'wind': {
+                        'direction_degrees': reading.wind_dir_deg,
+                        'direction_cardinal': reading.wind_direction_cardinal,
+                        'speed': {
+                            'avg_m_s': reading.wind_avg_m_s,
+                            'avg_mph': reading.wind_avg_mph,
+                            'max_m_s': reading.wind_max_m_s,
+                            'max_mph': reading.wind_max_mph
+                        }
+                    },
+                    'rain': {
+                        'total_mm': reading.rain_mm,
+                        'total_inches': reading.rain_inches,
+                        'since_previous_inches': reading.rainfall_since_previous
+                    },
+                    'uv': reading.uv,
+                    'uvi': reading.uvi,
+                    'light_lux': reading.light_lux
+                })
+            
+            # Include time interval information
+            time_info = {}
+            if len(readings) >= 2:
+                duration = end_time - start_time
+                time_info = {
+                    'start_time': start_time.isoformat(),
+                    'end_time': end_time.isoformat(),
+                    'duration_seconds': duration.total_seconds(),
+                    'duration_minutes': duration.total_seconds() / 60,
+                    'duration_hours': duration.total_seconds() / 3600
+                }
+            
+            return JsonResponse({
+                'status': 'success', 
+                'count': len(results),
+                'time_info': time_info,
+                'readings': results
             })
-        
-        # Include time interval information
-        time_info = {}
-        if len(readings) >= 2:
-            start_time = readings.last().time
-            end_time = readings.first().time
-            duration = end_time - start_time
-            time_info = {
-                'start_time': start_time.isoformat(),
-                'end_time': end_time.isoformat(),
-                'duration_seconds': duration.total_seconds(),
-                'duration_minutes': duration.total_seconds() / 60,
-                'duration_hours': duration.total_seconds() / 3600
-            }
-        
-        return JsonResponse({
-            'status': 'success', 
-            'count': len(results),
-            'time_info': time_info,
-            'readings': results
-        })
+        else:
+            return JsonResponse({
+                'status': 'success',
+                'count': 0,
+                'message': 'No readings found',
+                'readings': []
+            })
         
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
