@@ -10,7 +10,200 @@ To start the server:
 DJANGO_SETTINGS_MODULE=wyandata.settings uvicorn wyandata.asgi:application --host 0.0.0.0 --port 8000
 ```
 
-## Solar Module
+## Applications
+
+### Weather
+
+The Weather app collects data from Fineoffset weather stations and sensors.
+
+#### Supported Weather Stations and Sensors:
+- Fineoffset-WH24 Outdoor Weather Station
+- Fineoffset-WH65 Outdoor Weather Station
+- Fineoffset-WN32P Indoor Temperature/Humidity Sensor
+
+#### API Endpoints:
+
+**1. Receive Weather Data**
+
+Endpoint to receive data from rtl_433 weather station receiver.
+
+- URL: `/api/weather/receive/`
+- Method: `POST`
+- Content-Type: `application/json`
+- Example payload:
+```json
+{
+  "time": "2025-04-21 13:34:47",
+  "model": "Fineoffset-WH24",
+  "id": 182,
+  "battery_ok": 1,
+  "temperature_C": 5.500,
+  "humidity": 63,
+  "wind_dir_deg": 38,
+  "wind_avg_m_s": 0.000,
+  "wind_max_m_s": 0.000,
+  "rain_mm": 1461.300,
+  "uv": 83,
+  "uvi": 0,
+  "light_lux": 10602.000,
+  "mic": "CRC"
+}
+```
+
+**2. Get Current Weather Data**
+
+Endpoint to retrieve the most recent weather data.
+
+- URL: `/api/weather/current/`
+- Method: `GET`
+- Example response:
+```json
+{
+  "status": "success",
+  "timestamp": "2025-04-21T13:34:47-06:00",
+  "outdoor": {
+    "model": "Fineoffset-WH24",
+    "sensor_id": 182,
+    "temperature": {
+      "celsius": 5.5,
+      "fahrenheit": 41.9
+    },
+    "humidity": 63,
+    "wind": {
+      "direction_degrees": 38,
+      "direction_cardinal": "NE",
+      "speed": {
+        "avg_m_s": 0.0,
+        "avg_mph": 0.0,
+        "max_m_s": 0.0,
+        "max_mph": 0.0
+      }
+    },
+    "rain": {
+      "total_mm": 1461.3,
+      "total_inches": 57.53,
+      "since_previous_inches": 0.06
+    },
+    "uv": 83,
+    "uvi": 0,
+    "light_lux": 10602.0
+  },
+  "indoor": {
+    "model": "Fineoffset-WN32P",
+    "sensor_id": 105,
+    "temperature": {
+      "celsius": 21.8,
+      "fahrenheit": 71.2
+    },
+    "humidity": 42,
+    "timestamp": "2025-04-21T14:03:12-06:00"
+  }
+}
+```
+
+**3. Get Daily Weather Summaries**
+
+Endpoint to retrieve daily weather statistics.
+
+- URL: `/api/weather/daily/`
+- Method: `GET`
+- Query Parameters:
+  - `days`: Number of days to retrieve (default: 7, max: 365)
+- Example response:
+```json
+{
+  "status": "success",
+  "days": 7,
+  "summaries": [
+    {
+      "date": "2025-04-21",
+      "temperature": {
+        "min_c": 3.2,
+        "max_c": 12.8,
+        "avg_c": 8.5,
+        "min_f": 37.8,
+        "max_f": 55.0,
+        "avg_f": 47.3
+      },
+      "humidity": {
+        "min": 42,
+        "max": 78,
+        "avg": 65
+      },
+      "rainfall": {
+        "total_mm": 8.2,
+        "total_inches": 0.32
+      },
+      "wind": {
+        "max_speed_mph": 15.8,
+        "predominant_direction": "NW"
+      },
+      "max_uvi": 3
+    },
+    // Additional days...
+  ]
+}
+```
+
+**4. Get Monthly Weather Summaries**
+
+Endpoint to retrieve monthly weather statistics.
+
+- URL: `/api/weather/monthly/`
+- Method: `GET`
+- Query Parameters:
+  - `months`: Number of months to retrieve (default: 12, max: 60)
+- Example response:
+```json
+{
+  "status": "success",
+  "months": 12,
+  "summaries": [
+    {
+      "year_month": "2025-04",
+      "temperature": {
+        "min_c": -2.8,
+        "max_c": 24.3,
+        "avg_c": 10.7,
+        "min_f": 27.0,
+        "max_f": 75.7,
+        "avg_f": 51.3
+      },
+      "rainfall": {
+        "total_mm": 52.4,
+        "total_inches": 2.06,
+        "rainy_days": 8
+      },
+      "max_wind_speed_mph": 34.6
+    },
+    // Additional months...
+  ]
+}
+```
+
+### Weather Data Updates
+
+To generate daily and monthly weather summaries, run:
+
+```bash
+# Process the last 7 days (default)
+python manage.py generate_weather_summaries
+
+# Process a specific number of days
+python manage.py generate_weather_summaries --days=30
+
+# Force regeneration of existing summaries
+python manage.py generate_weather_summaries --regenerate
+```
+
+For automatic updates, add a cron job to run this command daily:
+
+```bash
+# Run daily at 12:05 AM
+5 0 * * * cd /path/to/wyandata && python manage.py generate_weather_summaries
+```
+
+### Solar
 
 ### Overview
 
@@ -163,7 +356,7 @@ WantedBy=multi-user.target
 
 The system automatically cleans up older solar data, keeping 7 days of historical information. This cleanup happens once per day at 2:00 AM.
 
-## System Module
+### System
 
 ### Overview
 

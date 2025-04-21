@@ -91,3 +91,83 @@ class IndoorSensor(BaseWeatherReading):
     
     class Meta:
         ordering = ['-time']
+
+class DailyWeatherSummary(models.Model):
+    """Daily weather statistics summary"""
+    date = models.DateField(primary_key=True)
+    min_temp_c = models.FloatField(null=True, blank=True)
+    max_temp_c = models.FloatField(null=True, blank=True)
+    avg_temp_c = models.FloatField(null=True, blank=True)
+    min_humidity = models.IntegerField(null=True, blank=True)
+    max_humidity = models.IntegerField(null=True, blank=True)
+    avg_humidity = models.IntegerField(null=True, blank=True)
+    total_rainfall_mm = models.FloatField(null=True, blank=True)
+    max_wind_speed_mph = models.FloatField(null=True, blank=True)
+    predominant_wind_direction = models.CharField(max_length=3, null=True, blank=True)
+    max_uvi = models.IntegerField(null=True, blank=True)
+    
+    @property
+    def min_temp_f(self):
+        if self.min_temp_c is not None:
+            return round((self.min_temp_c * 9/5) + 32, 1)
+        return None
+    
+    @property
+    def max_temp_f(self):
+        if self.max_temp_c is not None:
+            return round((self.max_temp_c * 9/5) + 32, 1)
+        return None
+    
+    @property
+    def avg_temp_f(self):
+        if self.avg_temp_c is not None:
+            return round((self.avg_temp_c * 9/5) + 32, 1)
+        return None
+    
+    @property
+    def total_rainfall_inches(self):
+        if self.total_rainfall_mm is not None:
+            return round(self.total_rainfall_mm / 25.4, 2)
+        return None
+    
+    class Meta:
+        ordering = ['-date']
+        verbose_name_plural = "Daily weather summaries"
+
+class MonthlyWeatherSummary(models.Model):
+    """Monthly weather statistics summary"""
+    year_month = models.CharField(max_length=7, primary_key=True)  # Format: YYYY-MM
+    min_temp_c = models.FloatField(null=True, blank=True)
+    max_temp_c = models.FloatField(null=True, blank=True)
+    avg_temp_c = models.FloatField(null=True, blank=True)
+    total_rainfall_mm = models.FloatField(null=True, blank=True)
+    rainy_days = models.IntegerField(null=True, blank=True)
+    max_wind_speed_mph = models.FloatField(null=True, blank=True)
+    
+    @property
+    def min_temp_f(self):
+        if self.min_temp_c is not None:
+            return round((self.min_temp_c * 9/5) + 32, 1)
+        return None
+    
+    @property
+    def max_temp_f(self):
+        if self.max_temp_c is not None:
+            return round((self.max_temp_c * 9/5) + 32, 1)
+        return None
+    
+    @property
+    def avg_temp_f(self):
+        if self.avg_temp_c is not None:
+            return round((self.avg_temp_c * 9/5) + 32, 1)
+        return None
+    
+    @property
+    def total_rainfall_inches(self):
+        if self.total_rainfall_mm is not None:
+            return round(self.total_rainfall_mm / 25.4, 2)
+        return None
+    
+    class Meta:
+        ordering = ['-year_month']
+        verbose_name_plural = "Monthly weather summaries"

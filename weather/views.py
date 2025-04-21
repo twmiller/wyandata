@@ -1,9 +1,9 @@
 from django.shortcuts import render
 from django.http import JsonResponse
-from .models import OutdoorWeatherReading, IndoorSensor
+from .models import OutdoorWeatherReading, IndoorSensor, DailyWeatherSummary, MonthlyWeatherSummary
 from django.views.decorators.csrf import csrf_exempt
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from django.utils import timezone
 import pytz
 
@@ -152,6 +152,103 @@ def get_current_weather(request):
             }
         
         return JsonResponse(data)
+        
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+def get_daily_weather(request):
+    """API endpoint to get daily weather summaries"""
+    try:
+        # Get query parameters
+        days = int(request.GET.get('days', 7))  # Default to 7 days
+        days = min(days, 365)  # Limit to reasonable amount
+        
+        # Calculate date range
+        end_date = timezone.now().date()
+        start_date = end_date - timedelta(days=days-1)
+        
+        # Get daily summaries in the date range
+        daily_summaries = DailyWeatherSummary.objects.filter(
+            date__range=[start_date, end_date]
+        ).order_by('date')
+        
+        # Format the response data
+        results = []
+        for summary in daily_summaries:
+            results.append({
+                'date': summary.date.isoformat(),
+                'temperature': {
+                    'min_c': summary.min_temp_c,
+                    'max_c': summary.max_temp_c,
+                    'avg_c': summary.avg_temp_c,
+                    'min_f': summary.min_temp_f,
+                    'max_f': summary.max_temp_f,
+                    'avg_f': summary.avg_temp_f
+                },
+                'humidity': {
+                    'min': summary.min_humidity,
+                    'max': summary.max_humidity,
+                    'avg': summary.avg_humidity
+                },
+                'rainfall': {
+                    'total_mm': summary.total_rainfall_mm,
+                    'total_inches': summary.total_rainfall_inches
+                },
+                'wind': {
+                    'max_speed_mph': summary.max_wind_speed_mph,
+                    'predominant_direction': summary.predominant_wind_direction
+                },
+                'max_uvi': summary.max_uvi
+            })
+        
+        return JsonResponse({'status': 'success', 'days': len(results), 'summaries': results})
+        
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+def get_monthly_weather(request):
+    """API endpoint to get monthly weather summaries"""
+    try:
+        # Get query parameters
+        months = int(request.GET.get('months', 12))  # Default to 12 months
+        months = min(months, 60)  # Limit to reasonable amount
+        
+        # Calculate date range
+        today = timezone.now().date()
+        end_month = today.strftime('%Y-%m')
+        
+        # Get earliest possible year-month
+        earliest_date = today.replace(day=1) - timedelta(days=30*months)
+        start_month = earliest_date.strftime('%Y-%m')
+        
+        # Get monthly summaries
+        monthly_summaries = MonthlyWeatherSummary.objects.filter(
+            year_month__gte=start_month,
+            year_month__lte=end_month
+        ).order_by('year_month')
+        
+        # Format the response data
+        results = []
+        for summary in monthly_summaries:
+            results.append({
+                'year_month': summary.year_month,
+                'temperature': {
+                    'min_c': summary.min_temp_c,
+                    'max_c': summary.max_temp_c,
+                    'avg_c': summary.avg_temp_c,
+                    'min_f': summary.min_temp_f,
+                    'max_f': summary.max_temp_f,
+                    'avg_f': summary.avg_temp_f
+                },
+                'rainfall': {
+                    'total_mm': summary.total_rainfall_mm,
+                    'total_inches': summary.total_rainfall_inches,
+                    'rainy_days': summary.rainy_days
+                },
+                'max_wind_speed_mph': summary.max_wind_speed_mph
+            })
+        
+        return JsonResponse({'status': 'success', 'months': len(results), 'summaries': results})
         
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
