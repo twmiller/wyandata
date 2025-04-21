@@ -14,11 +14,11 @@ class OutdoorWeatherReadingAdmin(admin.ModelAdmin):
 
 @admin.register(IndoorSensor)
 class IndoorSensorAdmin(admin.ModelAdmin):
-    list_display = ('time', 'model', 'sensor_id', 'temperature_F', 'humidity', 'battery_ok')
+    list_display = ('time', 'model', 'sensor_id', 'temperature_F', 'humidity', 'pressure_hPa', 'battery_ok')
     list_filter = ('model', 'sensor_id')
     date_hierarchy = 'time'
     search_fields = ('model', 'sensor_id')
-    readonly_fields = ('temperature_F',)
+    readonly_fields = ('temperature_F', 'pressure_inHg')
 
 @admin.register(DailyWeatherSummary)
 class DailyWeatherSummaryAdmin(admin.ModelAdmin):

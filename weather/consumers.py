@@ -91,6 +91,13 @@ class WeatherDataConsumer(AsyncWebsocketConsumer):
                     "humidity": indoor_reading.humidity,
                     "timestamp": indoor_reading.time.isoformat()
                 }
+                
+                # Add pressure data if available
+                if hasattr(indoor_reading, 'pressure_hPa') and indoor_reading.pressure_hPa is not None:
+                    data['indoor']['pressure'] = {
+                        'hPa': indoor_reading.pressure_hPa,
+                        'inHg': indoor_reading.pressure_inHg
+                    }
             
             return data
             

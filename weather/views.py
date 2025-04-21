@@ -133,7 +133,7 @@ def receive_weather_data(request):
                     }
                 )
                 
-            elif 'WN32P' in model:
+            elif 'WN32P' in model or 'WH32B' in model:
                 # Create indoor sensor reading
                 reading = IndoorSensor(
                     time=time,
@@ -143,6 +143,7 @@ def receive_weather_data(request):
                     temperature_C=temperature_c,
                     humidity=humidity,
                     channel=data.get('channel'),
+                    pressure_hPa=data.get('pressure_hPa'),  # Add pressure data
                     mic=data.get('mic')
                 )
                 reading.save()
@@ -202,6 +203,13 @@ def receive_weather_data(request):
                         
                     if outdoor_reading.light_lux is not None:
                         ws_data['outdoor']['light_lux'] = outdoor_reading.light_lux
+                    
+                    # Add pressure data to the indoor reading in the websocket data
+                    if reading.pressure_hPa is not None:
+                        ws_data['indoor']['pressure'] = {
+                            'hPa': reading.pressure_hPa,
+                            'inHg': reading.pressure_inHg
+                        }
                     
                     async_to_sync(channel_layer.group_send)(
                         "weather_data",
@@ -282,6 +290,13 @@ def get_current_weather(request):
                 'humidity': indoor_reading.humidity,
                 'timestamp': indoor_reading.time.isoformat()
             }
+            
+            # Add pressure data if available
+            if hasattr(indoor_reading, 'pressure_hPa') and indoor_reading.pressure_hPa is not None:
+                data['indoor']['pressure'] = {
+                    'hPa': indoor_reading.pressure_hPa,
+                    'inHg': indoor_reading.pressure_inHg
+                }
         
         return JsonResponse(data)
         

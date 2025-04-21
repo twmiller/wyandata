@@ -86,8 +86,16 @@ class OutdoorWeatherReading(BaseWeatherReading):
         return directions[idx]
 
 class IndoorSensor(BaseWeatherReading):
-    """Model for indoor sensors (WN32P)"""
+    """Model for indoor sensors (WN32P and WH32B)"""
     channel = models.IntegerField(null=True, blank=True)
+    pressure_hPa = models.FloatField(null=True, blank=True)
+    
+    @property
+    def pressure_inHg(self):
+        """Convert hectopascals to inches of mercury"""
+        if self.pressure_hPa is not None:
+            return round(self.pressure_hPa / 33.864, 2)
+        return None
     
     class Meta:
         ordering = ['-time']
