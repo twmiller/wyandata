@@ -106,3 +106,65 @@ class WeatherDataTests(TestCase):
         self.assertEqual(reading.sensor_id, 105)
         self.assertEqual(reading.temperature_C, 21.8)
         self.assertEqual(reading.temperature_F, 71.2)  # Test conversion property
+
+class CurrentWeatherAPITest(TestCase):
+    def setUp(self):
+        self.client = Client()
+        
+        # Create an outdoor weather reading
+        mountain_tz = pytz.timezone('America/Denver')
+        time = mountain_tz.localize(datetime(2025, 4, 21, 13, 34, 47))
+        
+        self.outdoor_reading = OutdoorWeatherReading.objects.create(
+            time=time,
+            model="Fineoffset-WH24",
+            sensor_id=182,
+            battery_ok=True,
+            temperature_C=5.5,
+            humidity=63,
+            wind_dir_deg=38,
+            wind_avg_m_s=0.0,
+            wind_max_m_s=0.0,
+            rain_mm=1461.3,
+            uv=83,
+            uvi=0,
+            light_lux=10602.0,
+        )
+        
+        # Create an indoor sensor reading
+        self.indoor_reading = IndoorSensor.objects.create(
+            time=time,
+            model="Fineoffset-WN32P",
+            sensor_id=105,
+            battery_ok=True,
+            temperature_C=21.8,
+            humidity=42,
+        )
+        
+    def test_get_current_weather(self):
+        """Test retrieving current weather data"""
+        url = reverse('weather:get_current_weather')
+        response = self.client.get(url)
+        
+        # Check that the response is successful
+        self.assertEqual(response.status_code, 200)
+        
+        # Parse the response
+        data = json.loads(response.content)
+        
+        # Check the structure and content of the response
+        self.assertEqual(data['status'], 'success')
+        self.assertEqual(data['outdoor']['model'], 'Fineoffset-WH24')
+        self.assertEqual(data['outdoor']['temperature']['celsius'], 5.5)
+        self.assertEqual(data['outdoor']['temperature']['fahrenheit'], 41.9)
+        self.assertEqual(data['outdoor']['humidity'], 63)
+        self.assertEqual(data['outdoor']['wind']['direction_cardinal'], 'NE')
+        self.assertEqual(data['outdoor']['rain']['total_mm'], 1461.3)
+        self.assertEqual(data['outdoor']['rain']['total_inches'], 57.53)
+        
+        # Check indoor data
+        self.assertTrue('indoor' in data)
+        self.assertEqual(data['indoor']['model'], 'Fineoffset-WN32P')
+        self.assertEqual(data['indoor']['temperature']['celsius'], 21.8)
+        self.assertEqual(data['indoor']['temperature']['fahrenheit'], 71.2)
+        self.assertEqual(data['indoor']['humidity'], 42)

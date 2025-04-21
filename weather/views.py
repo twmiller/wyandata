@@ -85,3 +85,73 @@ def receive_weather_data(request):
             return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
             
     return JsonResponse({'status': 'error', 'message': 'Only POST requests are allowed'}, status=405)
+
+def get_current_weather(request):
+    """API endpoint to get the current weather data"""
+    try:
+        # Get the latest outdoor reading
+        outdoor_reading = OutdoorWeatherReading.objects.order_by('-time').first()
+        
+        # Get the latest indoor reading
+        indoor_reading = IndoorSensor.objects.order_by('-time').first()
+        
+        if not outdoor_reading:
+            return JsonResponse({'status': 'error', 'message': 'No outdoor weather data available'}, status=404)
+            
+        # Format the response data
+        data = {
+            'status': 'success',
+            'timestamp': outdoor_reading.time.isoformat(),
+            'outdoor': {
+                'model': outdoor_reading.model,
+                'sensor_id': outdoor_reading.sensor_id,
+                'temperature': {
+                    'celsius': outdoor_reading.temperature_C,
+                    'fahrenheit': outdoor_reading.temperature_F
+                },
+                'humidity': outdoor_reading.humidity,
+                'wind': {
+                    'direction_degrees': outdoor_reading.wind_dir_deg,
+                    'direction_cardinal': outdoor_reading.wind_direction_cardinal,
+                    'speed': {
+                        'avg_m_s': outdoor_reading.wind_avg_m_s,
+                        'avg_mph': outdoor_reading.wind_avg_mph,
+                        'max_m_s': outdoor_reading.wind_max_m_s,
+                        'max_mph': outdoor_reading.wind_max_mph
+                    }
+                },
+                'rain': {
+                    'total_mm': outdoor_reading.rain_mm,
+                    'total_inches': outdoor_reading.rain_inches,
+                    'since_previous_inches': outdoor_reading.rainfall_since_previous
+                }
+            }
+        }
+        
+        # Add UV and light data if available
+        if outdoor_reading.uv is not None:
+            data['outdoor']['uv'] = outdoor_reading.uv
+        
+        if outdoor_reading.uvi is not None:
+            data['outdoor']['uvi'] = outdoor_reading.uvi
+            
+        if outdoor_reading.light_lux is not None:
+            data['outdoor']['light_lux'] = outdoor_reading.light_lux
+        
+        # Add indoor data if available
+        if indoor_reading:
+            data['indoor'] = {
+                'model': indoor_reading.model,
+                'sensor_id': indoor_reading.sensor_id,
+                'temperature': {
+                    'celsius': indoor_reading.temperature_C,
+                    'fahrenheit': indoor_reading.temperature_F
+                },
+                'humidity': indoor_reading.humidity,
+                'timestamp': indoor_reading.time.isoformat()
+            }
+        
+        return JsonResponse(data)
+        
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
