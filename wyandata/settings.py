@@ -152,11 +152,11 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# Set time zone to Mountain Time
+TIME_ZONE = 'America/Denver'
 
-USE_I18N = True
-
-USE_TZ = True
+# Disable timezone support if all your timestamps are already in local time
+USE_TZ = False
 
 
 # Static files (CSS, JavaScript, Images)

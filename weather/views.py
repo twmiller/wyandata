@@ -4,6 +4,8 @@ from .models import OutdoorWeatherReading, IndoorSensor
 from django.views.decorators.csrf import csrf_exempt
 import json
 from datetime import datetime
+from django.utils import timezone
+import pytz
 
 def weather_dashboard(request):
     """View to display the latest weather data"""
@@ -25,7 +27,17 @@ def receive_weather_data(request):
             
             # Extract common fields
             time_str = data.get('time')
-            time = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
+            
+            # Parse naive datetime and make it timezone-aware (Mountain Time)
+            naive_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
+            
+            # Use Mountain Time timezone - you can change to 'US/Mountain', 'MST', 'MDT' as appropriate
+            mountain_tz = pytz.timezone('America/Denver')
+            aware_time = mountain_tz.localize(naive_time)
+            
+            # Convert to the project's timezone if different (as defined in settings.py)
+            time = timezone.localtime(aware_time)
+            
             model = data.get('model')
             sensor_id = data.get('id')
             battery_ok = bool(data.get('battery_ok', 1))
