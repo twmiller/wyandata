@@ -123,115 +123,92 @@ def get_host_metrics_history(request, host_id):
     requested_metrics = request.GET.get('metrics')
     metric_names = requested_metrics.split(',') if requested_metrics else None
     
-    # For large datasets, use direct SQL with time-based partitioning
+    # Directly use SQL query without timezone issues
     from django.db import connection
     
-    # Important: Your debug info shows that server time is different from database time
-    # The server time is naive in America/Denver timezone: 2025-04-22T16:00:10.959957
-    # The database time is aware in UTC: 2025-04-22T22:00:10.959989+00:00
-    
-    # Calculate time range based on naive current time
-    end_time_naive = timezone.now()
-    start_time_naive = end_time_naive - timezone.timedelta(hours=hours)
-    
-    print(f"Using naive time range: {start_time_naive} to {end_time_naive}")
-    
-    # No timezone conversion needed since USE_TZ is False in settings
-    # and we're querying directly from the database
-    
-    # Use raw SQL query - first, find any metrics in the last 24 hours to verify timing
+    # Skip all timezone handling and use direct database queries
     with connection.cursor() as cursor:
+        # Use direct SQL to get metrics from database using NOW() function
         cursor.execute("""
             SELECT 
-                MIN(mv.timestamp) as earliest,
-                MAX(mv.timestamp) as latest,
-                COUNT(*) as count
-            FROM system_metricvalue mv
-            WHERE mv.host_id = %s 
-            AND mv.timestamp > NOW() - INTERVAL '24 hours'
-        """, [host_id])
+                MIN(timestamp) as earliest_time,
+                MAX(timestamp) as latest_time,
+                COUNT(*) as count  
+            FROM system_metricvalue 
+            WHERE host_id = %s
+            AND timestamp > NOW() - INTERVAL %s
+        """, [host_id, f"{hours} hours"])
         
-        row = cursor.fetchone()
-        earliest = row[0]
-        latest = row[1]
-        count = row[2]
+        time_data = cursor.fetchone()
+        earliest_time = time_data[0]
+        latest_time = time_data[1]
+        total_count = time_data[2]
         
-        print(f"Debug: Found {count} metrics in last 24 hours.")
-        print(f"Debug: Earliest is {earliest}, Latest is {latest}")
-        
-    # Get distinct metric types
-    with connection.cursor() as cursor:
+        # Get all available metrics
         cursor.execute("""
             SELECT DISTINCT mt.id, mt.name, mt.unit, mt.category
-            FROM system_metrictype mt
-            JOIN system_metricvalue mv ON mv.metric_type_id = mt.id
+            FROM system_metricvalue mv
+            JOIN system_metrictype mt ON mv.metric_type_id = mt.id
             WHERE mv.host_id = %s
             AND mv.timestamp > NOW() - INTERVAL %s
-        """, [host_id, f"{hours*2} hours"])  # Double hours as a safety margin
+        """, [host_id, f"{hours} hours"])
         
-        available_metrics = [
+        metric_types = [
             {'id': row[0], 'name': row[1], 'unit': row[2], 'category': row[3]}
             for row in cursor.fetchall()
         ]
-        
-        # Filter metric types if requested
-        if metric_names:
-            available_metrics = [m for m in available_metrics if m['name'] in metric_names]
     
-    print(f"Available metrics: {[m['name'] for m in available_metrics]}")
+    # Filter metric types if requested
+    if metric_names:
+        metric_types = [m for m in metric_types if m['name'] in metric_names]
     
     # Get data for each metric type
     metrics_list = []
     
-    for metric in available_metrics:
-        query = """
-            WITH raw_data AS (
-                SELECT 
-                    mv.timestamp, 
-                    CASE 
-                        WHEN mt.data_type = 'FLOAT' THEN mv.float_value
-                        WHEN mt.data_type = 'INT' THEN mv.int_value::text::float
-                        WHEN mt.data_type = 'BOOL' THEN mv.bool_value::text::float
-                        ELSE NULL
-                    END AS value
-                FROM system_metricvalue mv
-                JOIN system_metrictype mt ON mv.metric_type_id = mt.id
-                WHERE 
-                    mv.host_id = %s 
-                    AND mt.id = %s
-                    -- Use NOW() and a direct hour computation for more reliable time comparison
-                    AND mv.timestamp > NOW() - INTERVAL %s
-                    AND mv.timestamp <= NOW()
-                ORDER BY mv.timestamp
-            ),
-            bucketed AS (
-                SELECT 
-                    timestamp, 
-                    value,
-                    FLOOR(EXTRACT(EPOCH FROM timestamp) / (%s * 60)) AS bucket
-                FROM raw_data
-            )
-            SELECT timestamp, value
-            FROM (
-                SELECT 
-                    timestamp,
-                    value,
-                    ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY timestamp) AS rn
-                FROM bucketed
-            ) ranked
-            WHERE rn = 1
-            ORDER BY timestamp
-        """
-        
+    for metric in metric_types:
         with connection.cursor() as cursor:
-            cursor.execute(query, [
+            cursor.execute("""
+                WITH raw_data AS (
+                    SELECT 
+                        mv.timestamp, 
+                        CASE 
+                            WHEN mt.data_type = 'FLOAT' THEN mv.float_value
+                            WHEN mt.data_type = 'INT' THEN mv.int_value::text::float
+                            WHEN mt.data_type = 'BOOL' THEN mv.bool_value::text::float
+                            ELSE NULL
+                        END AS value
+                    FROM system_metricvalue mv
+                    JOIN system_metrictype mt ON mv.metric_type_id = mt.id
+                    WHERE 
+                        mv.host_id = %s 
+                        AND mt.id = %s
+                        AND mv.timestamp > NOW() - INTERVAL %s
+                    ORDER BY mv.timestamp
+                ),
+                bucketed AS (
+                    SELECT 
+                        timestamp, 
+                        value,
+                        FLOOR(EXTRACT(EPOCH FROM timestamp) / (%s * 60)) AS bucket
+                    FROM raw_data
+                )
+                SELECT timestamp, value
+                FROM (
+                    SELECT 
+                        timestamp,
+                        value,
+                        ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY timestamp) AS rn
+                    FROM bucketed
+                ) ranked
+                WHERE rn = 1
+                ORDER BY timestamp
+            """, [
                 host_id,
                 metric['id'],
-                f"{hours} hours",  # Use SQL interval notation
+                f"{hours} hours", 
                 interval_minutes
             ])
             
-            # Process the results
             data_points = [
                 {
                     'timestamp': row[0].isoformat() if row[0] else None,
@@ -239,10 +216,7 @@ def get_host_metrics_history(request, host_id):
                 }
                 for row in cursor.fetchall()
             ]
-            
-            print(f"Metric {metric['name']}: found {len(data_points)} data points")
         
-        # Only include metrics that have data points
         if data_points:
             metrics_list.append({
                 'name': metric['name'],
@@ -251,27 +225,19 @@ def get_host_metrics_history(request, host_id):
                 'data_points': data_points
             })
     
-    # Set response times using the same method as the database query
-    actual_end_time = timezone.now()
-    actual_start_time = actual_end_time - timezone.timedelta(hours=hours)
+    # Get safe start and end times from the database
+    start_time = earliest_time if earliest_time else None
+    end_time = latest_time if latest_time else None
     
     return Response({
         'host_id': str(host.id),
         'hostname': host.hostname,
         'time_range': {
-            'start': actual_start_time.isoformat(),
-            'end': actual_end_time.isoformat(),
+            'start': start_time.isoformat() if start_time else None,
+            'end': end_time.isoformat() if end_time else None,
             'duration_hours': hours
         },
         'interval_minutes': interval_minutes,
         'metrics': metrics_list,
-        'debug_info': {
-            'server_time': str(timezone.now()),
-            'timezone_name': timezone.get_current_timezone_name(),
-            'use_tz': getattr(settings, 'USE_TZ', False),
-            'database_time_offset': (timezone.now().astimezone(pytz.UTC) - timezone.now()).total_seconds() / 3600,
-            'query_timestamp_start': str(earliest) if 'earliest' in locals() and earliest else None,
-            'query_timestamp_end': str(latest) if 'latest' in locals() and latest else None,
-            'query_count_24h': count if 'count' in locals() else None
-        }
+        'records_found': total_count
     })
