@@ -116,42 +116,80 @@ def get_host_metrics_history(request, host_id):
         return Response({'error': 'Host not found'}, status=404)
     
     # Get query parameters
-    hours = min(int(request.GET.get('hours', 3)), 48)  # Default 3, max 48 hours
-    interval_minutes = max(1, min(int(request.GET.get('interval', 5)), 60))  # Default 5, min 1, max 60
+    hours = min(int(request.GET.get('hours', 3)), 48)  # Default 3, max 48
+    interval_minutes = max(1, min(int(request.GET.get('interval', 5)), 60))
     
-    # Get specific metrics if provided
+    # Get specific metrics if requested
     requested_metrics = request.GET.get('metrics')
     metric_names = requested_metrics.split(',') if requested_metrics else None
     
-    # Directly use SQL query without timezone issues
     from django.db import connection
-    
-    # Skip all timezone handling and use direct database queries
+
+    # CRITICAL FIX: Query by timestamp DIRECTLY without time zone conversions
+    # PostgreSQL timestamp comparison in raw SQL
     with connection.cursor() as cursor:
-        # Use direct SQL to get metrics from database using NOW() function
+        # First check for any actual metrics in the database for this host
         cursor.execute("""
-            SELECT 
-                MIN(timestamp) as earliest_time,
-                MAX(timestamp) as latest_time,
-                COUNT(*) as count  
-            FROM system_metricvalue 
+            SELECT COUNT(*), MIN(timestamp), MAX(timestamp)
+            FROM system_metricvalue
             WHERE host_id = %s
-            AND timestamp > NOW() - INTERVAL %s
-        """, [host_id, f"{hours} hours"])
+        """, [host_id])
+        
+        count_data = cursor.fetchone()
+        total_count = count_data[0]
+        min_timestamp = count_data[1]
+        max_timestamp = count_data[2]
+        
+        if total_count == 0:
+            # No data for this host at all
+            return Response({
+                'host_id': str(host.id),
+                'hostname': host.hostname,
+                'time_range': {
+                    'start': None,
+                    'end': None,
+                    'duration_hours': hours
+                },
+                'interval_minutes': interval_minutes,
+                'metrics': [],
+                'records_found': 0,
+                'debug_info': {
+                    'message': 'No records found for this host'
+                }
+            })
+            
+        # PROPER FIX: Use database's timestamp arithmetic with explicit interval
+        # This avoids all timezone issues by letting PostgreSQL handle time logic
+        cursor.execute("""
+            SELECT MIN(timestamp), MAX(timestamp), COUNT(*)
+            FROM system_metricvalue
+            WHERE 
+                host_id = %s AND
+                timestamp >= %s::timestamp - INTERVAL '%s hours'
+        """, [
+            host_id, 
+            max_timestamp,  # Use the most recent timestamp as reference
+            hours
+        ])
         
         time_data = cursor.fetchone()
-        earliest_time = time_data[0]
-        latest_time = time_data[1]
-        total_count = time_data[2]
+        start_time = time_data[0] 
+        end_time = time_data[1]
+        matched_count = time_data[2]
         
         # Get all available metrics
         cursor.execute("""
             SELECT DISTINCT mt.id, mt.name, mt.unit, mt.category
             FROM system_metricvalue mv
             JOIN system_metrictype mt ON mv.metric_type_id = mt.id
-            WHERE mv.host_id = %s
-            AND mv.timestamp > NOW() - INTERVAL %s
-        """, [host_id, f"{hours} hours"])
+            WHERE 
+                mv.host_id = %s AND
+                mv.timestamp >= %s::timestamp - INTERVAL '%s hours'
+        """, [
+            host_id,
+            max_timestamp,  # Use the most recent timestamp
+            hours
+        ])
         
         metric_types = [
             {'id': row[0], 'name': row[1], 'unit': row[2], 'category': row[3]}
@@ -167,6 +205,7 @@ def get_host_metrics_history(request, host_id):
     
     for metric in metric_types:
         with connection.cursor() as cursor:
+            # PROPER FIX: Use the known timestamp range instead of NOW()
             cursor.execute("""
                 WITH raw_data AS (
                     SELECT 
@@ -182,7 +221,7 @@ def get_host_metrics_history(request, host_id):
                     WHERE 
                         mv.host_id = %s 
                         AND mt.id = %s
-                        AND mv.timestamp > NOW() - INTERVAL %s
+                        AND mv.timestamp >= %s::timestamp - INTERVAL '%s hours'
                     ORDER BY mv.timestamp
                 ),
                 bucketed AS (
@@ -201,11 +240,12 @@ def get_host_metrics_history(request, host_id):
                     FROM bucketed
                 ) ranked
                 WHERE rn = 1
-                ORDER BY timestamp
+                ORDER BY timestamp;
             """, [
                 host_id,
                 metric['id'],
-                f"{hours} hours", 
+                max_timestamp,  # Use the most recent timestamp
+                hours,
                 interval_minutes
             ])
             
@@ -225,10 +265,6 @@ def get_host_metrics_history(request, host_id):
                 'data_points': data_points
             })
     
-    # Get safe start and end times from the database
-    start_time = earliest_time if earliest_time else None
-    end_time = latest_time if latest_time else None
-    
     return Response({
         'host_id': str(host.id),
         'hostname': host.hostname,
@@ -239,5 +275,10 @@ def get_host_metrics_history(request, host_id):
         },
         'interval_minutes': interval_minutes,
         'metrics': metrics_list,
-        'records_found': total_count
+        'records_found': matched_count,
+        'debug_info': {
+            'total_records_for_host': total_count,
+            'oldest_record_time': min_timestamp.isoformat() if min_timestamp else None,
+            'newest_record_time': max_timestamp.isoformat() if max_timestamp else None
+        }
     })
