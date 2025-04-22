@@ -615,6 +615,43 @@ The system module monitors and collects metrics from various hosts in your infra
   ```
   *Returns the most recent metrics data collected for a specific host, including CPU, memory, disk usage, and other monitored metrics.*
 
+- `GET /system/api/hosts/{host_id}/metrics/history/` - Get historical metrics for a host
+  ```json
+  {
+    "host_id": "550e8400-e29b-41d4-a716-446655440000",
+    "hostname": "webserver01",
+    "time_range": {
+      "start": "2025-04-20T12:45:22.428584+00:00",
+      "end": "2025-04-20T18:45:22.428584+00:00",
+      "duration_hours": 6.0
+    },
+    "metrics": {
+      "cpu_usage": [
+        {"timestamp": "2025-04-20T12:45:22.428584+00:00", "value": 15.2},
+        {"timestamp": "2025-04-20T13:45:22.428584+00:00", "value": 18.7},
+        {"timestamp": "2025-04-20T14:45:22.428584+00:00", "value": 22.1},
+        {"timestamp": "2025-04-20T15:45:22.428584+00:00", "value": 25.8},
+        {"timestamp": "2025-04-20T16:45:22.428584+00:00", "value": 30.2},
+        {"timestamp": "2025-04-20T17:45:22.428584+00:00", "value": 27.9},
+        {"timestamp": "2025-04-20T18:45:22.428584+00:00", "value": 23.5}
+      ],
+      "memory_used": [
+        {"timestamp": "2025-04-20T12:45:22.428584+00:00", "value": 7453024256},
+        {"timestamp": "2025-04-20T13:45:22.428584+00:00", "value": 7658832896},
+        {"timestamp": "2025-04-20T14:45:22.428584+00:00", "value": 7864641536},
+        {"timestamp": "2025-04-20T15:45:22.428584+00:00", "value": 8070450176},
+        {"timestamp": "2025-04-20T16:45:22.428584+00:00", "value": 8276258816},
+        {"timestamp": "2025-04-20T17:45:22.428584+00:00", "value": 8382067456},
+        {"timestamp": "2025-04-20T18:45:22.428584+00:00", "value": 8487240704}
+      ]
+    }
+  }
+  ```
+  *Returns time-series metrics data for a specific host over a period of time. Query parameters:*
+  - `hours`: Number of hours to look back (default: 6, max: 24)
+  - `interval`: Sampling interval in minutes (default: 5, min: 1, max: 60)
+  - `metrics`: Comma-separated list of metric names to include (default: all available metrics)
+
 ### WebSockets
 
 Connect to real-time updates via WebSocket:

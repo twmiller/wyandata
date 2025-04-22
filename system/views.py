@@ -3,6 +3,7 @@
 from django.http import JsonResponse
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+from django.utils import timezone
 from .models import Host, MetricValue, MetricType
 
 @api_view(['GET'])
@@ -23,8 +24,6 @@ def get_hosts(request):
         hosts_data.append(host_data)
     
     return Response(hosts_data)
-
-# system/views.py - add this function
 
 @api_view(['GET'])
 def get_host_metrics(request, host_id):
@@ -57,7 +56,6 @@ def get_host_metrics(request, host_id):
         'hostname': host.hostname,
         'metrics': latest_metrics
     })
-# system/views.py - add this function
 
 @api_view(['GET'])
 def get_host_details(request, host_id):
@@ -106,3 +104,62 @@ def get_host_details(request, host_id):
     }
     
     return Response(host_details)
+
+@api_view(['GET'])
+def get_host_metrics_history(request, host_id):
+    """Return historical metrics for a specific host"""
+    try:
+        host = Host.objects.get(pk=host_id)
+    except Host.DoesNotExist:
+        return Response({'error': 'Host not found'}, status=404)
+    
+    # Get query parameters
+    hours = min(int(request.GET.get('hours', 6)), 24)  # Default 6, max 24
+    interval_minutes = max(1, min(int(request.GET.get('interval', 5)), 60))  # Default 5, min 1, max 60
+    
+    # Get specific metrics if provided
+    requested_metrics = request.GET.get('metrics')
+    metric_names = requested_metrics.split(',') if requested_metrics else None
+    
+    # Calculate time range
+    end_time = timezone.now()
+    start_time = end_time - timezone.timedelta(hours=hours)
+    
+    # Query the metrics
+    query = MetricValue.objects.filter(
+        host=host,
+        timestamp__gte=start_time,
+        timestamp__lte=end_time
+    ).order_by('timestamp')
+    
+    # Filter by metric types if specified
+    if metric_names:
+        query = query.filter(metric_type__name__in=metric_names)
+    
+    # Get distinct metric types to organize data
+    metric_types = set(query.values_list('metric_type__name', flat=True).distinct())
+    
+    # Prepare the response data
+    metrics_data = {metric_name: [] for metric_name in metric_types}
+    
+    # Group metrics by type
+    for value in query:
+        metric_name = value.metric_type.name
+        metrics_data[metric_name].append({
+            'timestamp': value.timestamp.isoformat(),
+            'value': value.value
+        })
+    
+    # Calculate duration
+    duration = end_time - start_time
+    
+    return Response({
+        'host_id': str(host.id),
+        'hostname': host.hostname,
+        'time_range': {
+            'start': start_time.isoformat(),
+            'end': end_time.isoformat(),
+            'duration_hours': duration.total_seconds() / 3600.0
+        },
+        'metrics': metrics_data
+    })
