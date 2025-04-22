@@ -114,7 +114,7 @@ def get_host_metrics_history(request, host_id):
         return Response({'error': 'Host not found'}, status=404)
     
     # Get query parameters
-    hours = min(int(request.GET.get('hours', 6)), 24)  # Default 6, max 24
+    hours = min(int(request.GET.get('hours', 3)), 12)  # Default 3, max 12 hours
     interval_minutes = max(1, min(int(request.GET.get('interval', 5)), 60))  # Default 5, min 1, max 60
     
     # Get specific metrics if provided
@@ -125,30 +125,70 @@ def get_host_metrics_history(request, host_id):
     end_time = timezone.now()
     start_time = end_time - timezone.timedelta(hours=hours)
     
-    # Query the metrics
+    # Debug the time range
+    print(f"Querying metrics from {start_time} to {end_time} for host {host.hostname}")
+
+    # Query the metrics - use efficient filtering
     query = MetricValue.objects.filter(
         host=host,
         timestamp__gte=start_time,
         timestamp__lte=end_time
-    ).order_by('timestamp')
+    )
+    
+    # Check if we have any metrics for this host in this time range
+    metrics_count = query.count()
+    print(f"Found {metrics_count} metric values for host {host.hostname}")
+    
+    if metrics_count == 0:
+        # Try a longer time range for debugging
+        extended_start = end_time - timezone.timedelta(hours=24)
+        debug_count = MetricValue.objects.filter(
+            host=host, 
+            timestamp__gte=extended_start
+        ).count()
+        print(f"Looking back 24 hours: found {debug_count} metrics")
     
     # Filter by metric types if specified
     if metric_names:
         query = query.filter(metric_type__name__in=metric_names)
     
-    # Get distinct metric types to organize data
-    metric_types = set(query.values_list('metric_type__name', flat=True).distinct())
+    # For efficiency, get distinct metric types first
+    metric_types = list(query.values_list('metric_type__name', flat=True).distinct())
+    print(f"Found metric types: {metric_types}")
     
-    # Prepare the response data
-    metrics_data = {metric_name: [] for metric_name in metric_types}
+    # Prepare the response data - changed to lists of timestamped values
+    metrics_data = {}
     
-    # Group metrics by type
-    for value in query:
-        metric_name = value.metric_type.name
-        metrics_data[metric_name].append({
-            'timestamp': value.timestamp.isoformat(),
-            'value': value.value
-        })
+    # Processing for each metric type
+    for metric_name in metric_types:
+        # Get metrics for this type, ordered by timestamp
+        metric_values = query.filter(
+            metric_type__name=metric_name
+        ).select_related('metric_type').order_by('timestamp')
+        
+        # Apply downsampling based on interval
+        last_sample_time = None
+        interval_delta = timezone.timedelta(minutes=interval_minutes)
+        values_list = []
+        
+        for value in metric_values:
+            if last_sample_time is None or value.timestamp - last_sample_time >= interval_delta:
+                # Get the unit and category from the first value
+                if metric_name not in metrics_data:
+                    unit = value.metric_type.unit
+                    category = value.metric_type.category
+                    metrics_data[metric_name] = {
+                        "unit": unit,
+                        "category": category,
+                        "values": []
+                    }
+                
+                # Add value to the list
+                metrics_data[metric_name]["values"].append({
+                    'timestamp': value.timestamp.isoformat(),
+                    'value': value.value
+                })
+                last_sample_time = value.timestamp
     
     # Calculate duration
     duration = end_time - start_time
@@ -161,5 +201,6 @@ def get_host_metrics_history(request, host_id):
             'end': end_time.isoformat(),
             'duration_hours': duration.total_seconds() / 3600.0
         },
+        'interval_minutes': interval_minutes,
         'metrics': metrics_data
     })
