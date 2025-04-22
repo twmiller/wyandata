@@ -126,35 +126,48 @@ def get_host_metrics_history(request, host_id):
     # For large datasets, use direct SQL with time-based partitioning
     from django.db import connection
     
-    # Calculate time range with explicit UTC handling
-    end_time = timezone.now()
-    start_time = end_time - timezone.timedelta(hours=hours)
+    # Important: Your debug info shows that server time is different from database time
+    # The server time is naive in America/Denver timezone: 2025-04-22T16:00:10.959957
+    # The database time is aware in UTC: 2025-04-22T22:00:10.959989+00:00
     
-    # Print out full debug data
-    print(f"Current time (server): {timezone.now()}")
-    print(f"Query time range: {start_time} to {end_time}")
-    print(f"Host ID: {host_id}")
+    # Calculate time range based on naive current time
+    end_time_naive = timezone.now()
+    start_time_naive = end_time_naive - timezone.timedelta(hours=hours)
     
-    # For safety, force times to be timezone-aware 
-    # Use pytz.UTC instead of timezone.utc
-    if timezone.is_naive(start_time):
-        start_time = timezone.make_aware(start_time, pytz.UTC)
-    if timezone.is_naive(end_time):
-        end_time = timezone.make_aware(end_time, pytz.UTC)
+    print(f"Using naive time range: {start_time_naive} to {end_time_naive}")
     
-    # For cleaner SQL, format timestamps as strings
-    start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S%z')
-    end_time_str = end_time.strftime('%Y-%m-%d %H:%M:%S%z')
+    # No timezone conversion needed since USE_TZ is False in settings
+    # and we're querying directly from the database
     
-    # Run direct SQL query
+    # Use raw SQL query - first, find any metrics in the last 24 hours to verify timing
     with connection.cursor() as cursor:
-        # First get all available metric types
+        cursor.execute("""
+            SELECT 
+                MIN(mv.timestamp) as earliest,
+                MAX(mv.timestamp) as latest,
+                COUNT(*) as count
+            FROM system_metricvalue mv
+            WHERE mv.host_id = %s 
+            AND mv.timestamp > NOW() - INTERVAL '24 hours'
+        """, [host_id])
+        
+        row = cursor.fetchone()
+        earliest = row[0]
+        latest = row[1]
+        count = row[2]
+        
+        print(f"Debug: Found {count} metrics in last 24 hours.")
+        print(f"Debug: Earliest is {earliest}, Latest is {latest}")
+        
+    # Get distinct metric types
+    with connection.cursor() as cursor:
         cursor.execute("""
             SELECT DISTINCT mt.id, mt.name, mt.unit, mt.category
             FROM system_metrictype mt
             JOIN system_metricvalue mv ON mv.metric_type_id = mt.id
             WHERE mv.host_id = %s
-        """, [host_id])
+            AND mv.timestamp > NOW() - INTERVAL %s
+        """, [host_id, f"{hours*2} hours"])  # Double hours as a safety margin
         
         available_metrics = [
             {'id': row[0], 'name': row[1], 'unit': row[2], 'category': row[3]}
@@ -171,7 +184,6 @@ def get_host_metrics_history(request, host_id):
     metrics_list = []
     
     for metric in available_metrics:
-        # Use raw SQL query with proper timestamp comparison and efficient bucketing
         query = """
             WITH raw_data AS (
                 SELECT 
@@ -187,11 +199,11 @@ def get_host_metrics_history(request, host_id):
                 WHERE 
                     mv.host_id = %s 
                     AND mt.id = %s
-                    AND mv.timestamp >= %s
-                    AND mv.timestamp <= %s
+                    -- Use NOW() and a direct hour computation for more reliable time comparison
+                    AND mv.timestamp > NOW() - INTERVAL %s
+                    AND mv.timestamp <= NOW()
                 ORDER BY mv.timestamp
             ),
-            -- Create buckets by extracting epoch and dividing by interval in seconds
             bucketed AS (
                 SELECT 
                     timestamp, 
@@ -199,7 +211,6 @@ def get_host_metrics_history(request, host_id):
                     FLOOR(EXTRACT(EPOCH FROM timestamp) / (%s * 60)) AS bucket
                 FROM raw_data
             )
-            -- Get one sample per bucket (first in each group)
             SELECT timestamp, value
             FROM (
                 SELECT 
@@ -216,19 +227,20 @@ def get_host_metrics_history(request, host_id):
             cursor.execute(query, [
                 host_id,
                 metric['id'],
-                start_time,
-                end_time,
+                f"{hours} hours",  # Use SQL interval notation
                 interval_minutes
             ])
             
-            # Add timezone info to the timestamps when converting back to Python
+            # Process the results
             data_points = [
                 {
-                    'timestamp': row[0].isoformat(),
+                    'timestamp': row[0].isoformat() if row[0] else None,
                     'value': float(row[1]) if row[1] is not None else None
                 }
                 for row in cursor.fetchall()
             ]
+            
+            print(f"Metric {metric['name']}: found {len(data_points)} data points")
         
         # Only include metrics that have data points
         if data_points:
@@ -239,23 +251,27 @@ def get_host_metrics_history(request, host_id):
                 'data_points': data_points
             })
     
-    print(f"Returning {len(metrics_list)} metrics with data")
+    # Set response times using the same method as the database query
+    actual_end_time = timezone.now()
+    actual_start_time = actual_end_time - timezone.timedelta(hours=hours)
     
     return Response({
         'host_id': str(host.id),
         'hostname': host.hostname,
         'time_range': {
-            'start': start_time.isoformat(),
-            'end': end_time.isoformat(),
-            'duration_hours': (end_time - start_time).total_seconds() / 3600.0
+            'start': actual_start_time.isoformat(),
+            'end': actual_end_time.isoformat(),
+            'duration_hours': hours
         },
         'interval_minutes': interval_minutes,
         'metrics': metrics_list,
         'debug_info': {
-            'server_time': timezone.now().isoformat(),
+            'server_time': str(timezone.now()),
             'timezone_name': timezone.get_current_timezone_name(),
             'use_tz': getattr(settings, 'USE_TZ', False),
-            # Update this line to avoid using timezone.utc
-            'database_time': timezone.now().astimezone(pytz.UTC).isoformat()
+            'database_time_offset': (timezone.now().astimezone(pytz.UTC) - timezone.now()).total_seconds() / 3600,
+            'query_timestamp_start': str(earliest) if 'earliest' in locals() and earliest else None,
+            'query_timestamp_end': str(latest) if 'latest' in locals() and latest else None,
+            'query_count_24h': count if 'count' in locals() else None
         }
     })
