@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from django.utils import timezone
 from .models import Host, MetricValue, MetricType
 from django.conf import settings
+import pytz  # Import pytz for timezone handling
 
 @api_view(['GET'])
 def get_hosts(request):
@@ -134,11 +135,12 @@ def get_host_metrics_history(request, host_id):
     print(f"Query time range: {start_time} to {end_time}")
     print(f"Host ID: {host_id}")
     
-    # For safety, force times to be timezone-aware UTC
+    # For safety, force times to be timezone-aware 
+    # Use pytz.UTC instead of timezone.utc
     if timezone.is_naive(start_time):
-        start_time = timezone.make_aware(start_time, timezone.utc)
+        start_time = timezone.make_aware(start_time, pytz.UTC)
     if timezone.is_naive(end_time):
-        end_time = timezone.make_aware(end_time, timezone.utc)
+        end_time = timezone.make_aware(end_time, pytz.UTC)
     
     # For cleaner SQL, format timestamps as strings
     start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S%z')
@@ -253,6 +255,7 @@ def get_host_metrics_history(request, host_id):
             'server_time': timezone.now().isoformat(),
             'timezone_name': timezone.get_current_timezone_name(),
             'use_tz': getattr(settings, 'USE_TZ', False),
-            'database_time': timezone.now().astimezone(timezone.utc).isoformat()
+            # Update this line to avoid using timezone.utc
+            'database_time': timezone.now().astimezone(pytz.UTC).isoformat()
         }
     })
