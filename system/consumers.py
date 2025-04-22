@@ -281,30 +281,29 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
                 pass
         
         network_interface_name = value_data.get('network_interface')
-        if network_interface_name:age only
-            try:t subscribes to specific hosts
+        if network_interface_name:
+            try:
                 metric_value.network_interface = NetworkInterface.objects.get(
-                    host=host, name=network_interface_nametablished',
-                )ics. Please subscribe to specific hosts.'
+                    host=host, name=network_interface_name
+                )
             except NetworkInterface.DoesNotExist:
-                passpt Exception as e:
-        ceptions
+                pass
+        
         metric_value.save()
         return metric_value
-    ose connections
-    @database_sync_to_asynce_old_connections()            # Always close connections            close_old_connections()    def get_latest_data(self):        """Fetch the latest data for the client"""
+    
+    @database_sync_to_async
+    def get_latest_data(self):
+        """Fetch the latest data for the client"""
         try:
             # Close any old connections before making new queries
             close_old_connections()
             
-            # Logic to fetch the latest data
-            # Replace the following with actual implementation
-            data = {
-                'type': 'latest_data',
-                'content': 'This is the latest data'
+            # Return connection established message
+            return {
+                'type': 'connection_established',
+                'message': 'Connected to system metrics. Please subscribe to specific hosts.'
             }
-            
-            return data
         except Exception as e:
             # Handle exceptions
             return None
