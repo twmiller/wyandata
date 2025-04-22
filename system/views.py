@@ -125,61 +125,71 @@ def get_host_metrics_history(request, host_id):
     end_time = timezone.now()
     start_time = end_time - timezone.timedelta(hours=hours)
     
-    print(f"Querying metrics from {start_time} to {end_time} for host {host.hostname}")
+    # Debug output
+    print(f"Querying metrics for host {host.hostname} from {start_time} to {end_time}")
     
-    # Explicitly run a raw SQL query to check if we have metrics for this host
-    from django.db import connection
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT COUNT(*) FROM system_metricvalue 
-            WHERE host_id = %s AND timestamp > %s
-        """, [host_id, start_time])
-        count = cursor.fetchone()[0]
-        print(f"Raw SQL metrics count for {host_id}: {count}")
+    # Direct debugging check for metrics in this time range
+    metric_count = MetricValue.objects.filter(
+        host=host, 
+        timestamp__gte=start_time
+    ).count()
+    print(f"Total metrics found: {metric_count}")
     
-    # Get all metrics for this host in the time range
-    all_metrics = MetricValue.objects.filter(
-        host=host,
-        timestamp__gte=start_time,
-        timestamp__lte=end_time
-    ).select_related('metric_type').order_by('timestamp')
+    # Get all metric values within the time range, grouped by type
+    metrics_list = []
     
-    print(f"Found {all_metrics.count()} total metrics")
+    # First get all distinct metric types for this host
+    metric_types = MetricType.objects.filter(
+        values__host=host,
+        values__timestamp__gte=start_time,
+        values__timestamp__lte=end_time
+    ).distinct()
     
-    # Group metrics by their type
-    metrics_by_type = {}
+    print(f"Found {metric_types.count()} distinct metric types")
     
-    for metric in all_metrics:
-        metric_name = metric.metric_type.name
-        
-        # Skip if we're filtering metrics and this one isn't requested
-        if metric_names and metric_name not in metric_names:
+    # Process each metric type
+    for metric_type in metric_types:
+        # Skip if we're filtering and this type isn't requested
+        if metric_names and metric_type.name not in metric_names:
             continue
             
-        # Initialize the metric type entry if needed
-        if metric_name not in metrics_by_type:
-            metrics_by_type[metric_name] = {
-                "name": metric_name,
-                "unit": metric.metric_type.unit,
-                "category": metric.metric_type.category,
-                "data": []
-            }
+        # Get values for this metric type
+        values = MetricValue.objects.filter(
+            host=host,
+            metric_type=metric_type,
+            timestamp__gte=start_time,
+            timestamp__lte=end_time
+        ).order_by('timestamp')
         
-        # Add this data point
-        metrics_by_type[metric_name]["data"].append({
-            "timestamp": metric.timestamp.isoformat(),
-            "value": metric.value
-        })
+        print(f"Metric type {metric_type.name}: found {values.count()} values")
+        
+        if not values.exists():
+            continue
+            
+        # Apply downsampling if needed
+        data_points = []
+        last_timestamp = None
+        interval_delta = timezone.timedelta(minutes=interval_minutes)
+        
+        for value in values:
+            # Include this point if it's our first point or if enough time has passed
+            if last_timestamp is None or (value.timestamp - last_timestamp) >= interval_delta:
+                data_points.append({
+                    'timestamp': value.timestamp.isoformat(),
+                    'value': value.value
+                })
+                last_timestamp = value.timestamp
+        
+        # Add this metric type to our results if we have data points
+        if data_points:
+            metrics_list.append({
+                'name': metric_type.name,
+                'category': metric_type.category,
+                'unit': metric_type.unit,
+                'data_points': data_points
+            })
     
-    # Convert the dictionary to a list for the response
-    metrics_list = list(metrics_by_type.values())
-    
-    print(f"Returning {len(metrics_list)} metric types with data")
-    for m in metrics_list:
-        print(f"  - {m['name']}: {len(m['data'])} data points")
-    
-    # Calculate duration
-    duration = end_time - start_time
+    print(f"Returning {len(metrics_list)} metrics with data")
     
     return Response({
         'host_id': str(host.id),
@@ -187,8 +197,8 @@ def get_host_metrics_history(request, host_id):
         'time_range': {
             'start': start_time.isoformat(),
             'end': end_time.isoformat(),
-            'duration_hours': duration.total_seconds() / 3600.0
+            'duration_hours': (end_time - start_time).total_seconds() / 3600.0
         },
         'interval_minutes': interval_minutes,
-        'metrics': metrics_list  # Now returning a list of metrics with their data
+        'metrics': metrics_list
     })
