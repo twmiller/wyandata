@@ -115,87 +115,125 @@ def get_host_metrics_history(request, host_id):
         return Response({'error': 'Host not found'}, status=404)
     
     # Get query parameters
-    hours = min(int(request.GET.get('hours', 3)), 12)  # Default 3, max 12 hours
+    hours = min(int(request.GET.get('hours', 3)), 48)  # Default 3, max 48 hours
     interval_minutes = max(1, min(int(request.GET.get('interval', 5)), 60))  # Default 5, min 1, max 60
     
     # Get specific metrics if provided
     requested_metrics = request.GET.get('metrics')
     metric_names = requested_metrics.split(',') if requested_metrics else None
     
-    # Calculate time range in UTC
+    # For large datasets, use direct SQL with time-based partitioning
+    from django.db import connection
+    
+    # Calculate time range with explicit UTC handling
     end_time = timezone.now()
     start_time = end_time - timezone.timedelta(hours=hours)
     
-    # Debug output
-    print(f"Current server time: {timezone.now()}")
-    print(f"Querying metrics from {start_time} to {end_time} for host {host.hostname}")
+    # Print out full debug data
+    print(f"Current time (server): {timezone.now()}")
+    print(f"Query time range: {start_time} to {end_time}")
+    print(f"Host ID: {host_id}")
     
-    # For debugging purposes, get all metrics for this host
-    all_records = MetricValue.objects.filter(host=host).count()
-    print(f"Total metrics for this host: {all_records}")
+    # For safety, force times to be timezone-aware UTC
+    if timezone.is_naive(start_time):
+        start_time = timezone.make_aware(start_time, timezone.utc)
+    if timezone.is_naive(end_time):
+        end_time = timezone.make_aware(end_time, timezone.utc)
     
-    # Get latest metric timestamp
-    latest = MetricValue.objects.filter(host=host).order_by('-timestamp').first()
-    if latest:
-        print(f"Most recent metric timestamp: {latest.timestamp}")
+    # For cleaner SQL, format timestamps as strings
+    start_time_str = start_time.strftime('%Y-%m-%d %H:%M:%S%z')
+    end_time_str = end_time.strftime('%Y-%m-%d %H:%M:%S%z')
     
-    # Get earliest metric timestamp
-    earliest = MetricValue.objects.filter(host=host).order_by('timestamp').first()  
-    if earliest:
-        print(f"Earliest metric timestamp: {earliest.timestamp}")
+    # Run direct SQL query
+    with connection.cursor() as cursor:
+        # First get all available metric types
+        cursor.execute("""
+            SELECT DISTINCT mt.id, mt.name, mt.unit, mt.category
+            FROM system_metrictype mt
+            JOIN system_metricvalue mv ON mv.metric_type_id = mt.id
+            WHERE mv.host_id = %s
+        """, [host_id])
+        
+        available_metrics = [
+            {'id': row[0], 'name': row[1], 'unit': row[2], 'category': row[3]}
+            for row in cursor.fetchall()
+        ]
+        
+        # Filter metric types if requested
+        if metric_names:
+            available_metrics = [m for m in available_metrics if m['name'] in metric_names]
     
-    # Use a more direct query with explicit datetime comparisons
-    query = MetricValue.objects.filter(
-        host=host,
-        timestamp__range=(start_time, end_time)
-    ).select_related('metric_type')
+    print(f"Available metrics: {[m['name'] for m in available_metrics]}")
     
-    print(f"Found {query.count()} metrics in the specified time range")
-    
-    # First get all distinct metric types for this host in the range
-    metric_types = set()
-    for value in query:
-        metric_types.add(value.metric_type)
-    
-    print(f"Found {len(metric_types)} distinct metric types")
-    
-    # Process each metric type
+    # Get data for each metric type
     metrics_list = []
     
-    for metric_type in metric_types:
-        # Skip if we're filtering and this type isn't requested
-        if metric_names and metric_type.name not in metric_names:
-            continue
+    for metric in available_metrics:
+        # Use raw SQL query with proper timestamp comparison and efficient bucketing
+        query = """
+            WITH raw_data AS (
+                SELECT 
+                    mv.timestamp, 
+                    CASE 
+                        WHEN mt.data_type = 'FLOAT' THEN mv.float_value
+                        WHEN mt.data_type = 'INT' THEN mv.int_value::text::float
+                        WHEN mt.data_type = 'BOOL' THEN mv.bool_value::text::float
+                        ELSE NULL
+                    END AS value
+                FROM system_metricvalue mv
+                JOIN system_metrictype mt ON mv.metric_type_id = mt.id
+                WHERE 
+                    mv.host_id = %s 
+                    AND mt.id = %s
+                    AND mv.timestamp >= %s
+                    AND mv.timestamp <= %s
+                ORDER BY mv.timestamp
+            ),
+            -- Create buckets by extracting epoch and dividing by interval in seconds
+            bucketed AS (
+                SELECT 
+                    timestamp, 
+                    value,
+                    FLOOR(EXTRACT(EPOCH FROM timestamp) / (%s * 60)) AS bucket
+                FROM raw_data
+            )
+            -- Get one sample per bucket (first in each group)
+            SELECT timestamp, value
+            FROM (
+                SELECT 
+                    timestamp,
+                    value,
+                    ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY timestamp) AS rn
+                FROM bucketed
+            ) ranked
+            WHERE rn = 1
+            ORDER BY timestamp
+        """
         
-        # Get values for this metric type
-        values_for_type = [v for v in query if v.metric_type == metric_type]
-        values_for_type.sort(key=lambda x: x.timestamp)
+        with connection.cursor() as cursor:
+            cursor.execute(query, [
+                host_id,
+                metric['id'],
+                start_time,
+                end_time,
+                interval_minutes
+            ])
+            
+            # Add timezone info to the timestamps when converting back to Python
+            data_points = [
+                {
+                    'timestamp': row[0].isoformat(),
+                    'value': float(row[1]) if row[1] is not None else None
+                }
+                for row in cursor.fetchall()
+            ]
         
-        print(f"Metric type {metric_type.name}: found {len(values_for_type)} values")
-        
-        if not values_for_type:
-            continue
-        
-        # Apply downsampling if needed
-        data_points = []
-        last_timestamp = None
-        interval_delta = timezone.timedelta(minutes=interval_minutes)
-        
-        for value in values_for_type:
-            # Include this point if it's our first point or if enough time has passed
-            if last_timestamp is None or (value.timestamp - last_timestamp) >= interval_delta:
-                data_points.append({
-                    'timestamp': value.timestamp.isoformat(),
-                    'value': value.value
-                })
-                last_timestamp = value.timestamp
-        
-        # Add this metric type to our results if we have data points
+        # Only include metrics that have data points
         if data_points:
             metrics_list.append({
-                'name': metric_type.name,
-                'category': metric_type.category,
-                'unit': metric_type.unit,
+                'name': metric['name'],
+                'category': metric['category'],
+                'unit': metric['unit'],
                 'data_points': data_points
             })
     
@@ -214,6 +252,7 @@ def get_host_metrics_history(request, host_id):
         'debug_info': {
             'server_time': timezone.now().isoformat(),
             'timezone_name': timezone.get_current_timezone_name(),
-            'use_tz': getattr(settings, 'USE_TZ', False)
+            'use_tz': getattr(settings, 'USE_TZ', False),
+            'database_time': timezone.now().astimezone(timezone.utc).isoformat()
         }
     })
