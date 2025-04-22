@@ -5,6 +5,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.utils import timezone
 from .models import Host, MetricValue, MetricType
+from django.conf import settings
 
 @api_view(['GET'])
 def get_hosts(request):
@@ -121,57 +122,66 @@ def get_host_metrics_history(request, host_id):
     requested_metrics = request.GET.get('metrics')
     metric_names = requested_metrics.split(',') if requested_metrics else None
     
-    # Calculate time range
+    # Calculate time range in UTC
     end_time = timezone.now()
     start_time = end_time - timezone.timedelta(hours=hours)
     
     # Debug output
-    print(f"Querying metrics for host {host.hostname} from {start_time} to {end_time}")
+    print(f"Current server time: {timezone.now()}")
+    print(f"Querying metrics from {start_time} to {end_time} for host {host.hostname}")
     
-    # Direct debugging check for metrics in this time range
-    metric_count = MetricValue.objects.filter(
-        host=host, 
-        timestamp__gte=start_time
-    ).count()
-    print(f"Total metrics found: {metric_count}")
+    # For debugging purposes, get all metrics for this host
+    all_records = MetricValue.objects.filter(host=host).count()
+    print(f"Total metrics for this host: {all_records}")
     
-    # Get all metric values within the time range, grouped by type
-    metrics_list = []
+    # Get latest metric timestamp
+    latest = MetricValue.objects.filter(host=host).order_by('-timestamp').first()
+    if latest:
+        print(f"Most recent metric timestamp: {latest.timestamp}")
     
-    # First get all distinct metric types for this host
-    metric_types = MetricType.objects.filter(
-        values__host=host,
-        values__timestamp__gte=start_time,
-        values__timestamp__lte=end_time
-    ).distinct()
+    # Get earliest metric timestamp
+    earliest = MetricValue.objects.filter(host=host).order_by('timestamp').first()  
+    if earliest:
+        print(f"Earliest metric timestamp: {earliest.timestamp}")
     
-    print(f"Found {metric_types.count()} distinct metric types")
+    # Use a more direct query with explicit datetime comparisons
+    query = MetricValue.objects.filter(
+        host=host,
+        timestamp__range=(start_time, end_time)
+    ).select_related('metric_type')
+    
+    print(f"Found {query.count()} metrics in the specified time range")
+    
+    # First get all distinct metric types for this host in the range
+    metric_types = set()
+    for value in query:
+        metric_types.add(value.metric_type)
+    
+    print(f"Found {len(metric_types)} distinct metric types")
     
     # Process each metric type
+    metrics_list = []
+    
     for metric_type in metric_types:
         # Skip if we're filtering and this type isn't requested
         if metric_names and metric_type.name not in metric_names:
             continue
-            
+        
         # Get values for this metric type
-        values = MetricValue.objects.filter(
-            host=host,
-            metric_type=metric_type,
-            timestamp__gte=start_time,
-            timestamp__lte=end_time
-        ).order_by('timestamp')
+        values_for_type = [v for v in query if v.metric_type == metric_type]
+        values_for_type.sort(key=lambda x: x.timestamp)
         
-        print(f"Metric type {metric_type.name}: found {values.count()} values")
+        print(f"Metric type {metric_type.name}: found {len(values_for_type)} values")
         
-        if not values.exists():
+        if not values_for_type:
             continue
-            
+        
         # Apply downsampling if needed
         data_points = []
         last_timestamp = None
         interval_delta = timezone.timedelta(minutes=interval_minutes)
         
-        for value in values:
+        for value in values_for_type:
             # Include this point if it's our first point or if enough time has passed
             if last_timestamp is None or (value.timestamp - last_timestamp) >= interval_delta:
                 data_points.append({
@@ -200,5 +210,10 @@ def get_host_metrics_history(request, host_id):
             'duration_hours': (end_time - start_time).total_seconds() / 3600.0
         },
         'interval_minutes': interval_minutes,
-        'metrics': metrics_list
+        'metrics': metrics_list,
+        'debug_info': {
+            'server_time': timezone.now().isoformat(),
+            'timezone_name': timezone.get_current_timezone_name(),
+            'use_tz': getattr(settings, 'USE_TZ', False)
+        }
     })
