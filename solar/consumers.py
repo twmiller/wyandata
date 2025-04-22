@@ -1,6 +1,7 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
+from django.db import close_old_connections
 from asgiref.sync import async_to_sync
 from .models import SolarControllerData
 
@@ -27,11 +28,16 @@ class SolarDataConsumer(AsyncWebsocketConsumer):
             "solar_data",
             self.channel_name
         )
+        # Close any open database connections
+        await database_sync_to_async(close_old_connections)()
 
     @database_sync_to_async
     def get_latest_data(self):
         """Get the latest solar data from the database"""
         try:
+            # Close any old connections before making new queries
+            close_old_connections()
+            
             latest = SolarControllerData.objects.first()  # Using the ordering from model Meta
             if not latest:
                 return None
@@ -68,6 +74,9 @@ class SolarDataConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             print(f"Error retrieving latest solar data: {e}")
             return None
+        finally:
+            # Always close connections
+            close_old_connections()
 
     # Method called when receiving a message from the group
     async def solar_update(self, event):

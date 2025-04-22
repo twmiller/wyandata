@@ -4,6 +4,7 @@ import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.utils import timezone
+from django.db import close_old_connections
 from .models import Host, MetricType, MetricValue, StorageDevice, NetworkInterface
 from .db_utils import with_retry
 
@@ -19,6 +20,11 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         )
         
         await self.accept()
+        
+        # Send the latest data to the newly connected client
+        latest_data = await self.get_latest_data()
+        if latest_data:
+            await self.send(text_data=json.dumps(latest_data))
     
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection"""
@@ -27,6 +33,9 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
             self.room_group_name,
             self.channel_name
         )
+        
+        # Close any open database connections
+        await database_sync_to_async(close_old_connections)()
     
     async def receive(self, text_data):
         """Handle incoming messages from clients"""
@@ -264,3 +273,25 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         
         metric_value.save()
         return metric_value
+    
+    @database_sync_to_async
+    def get_latest_data(self):
+        """Fetch the latest data for the client"""
+        try:
+            # Close any old connections before making new queries
+            close_old_connections()
+            
+            # Logic to fetch the latest data
+            # Replace the following with actual implementation
+            data = {
+                'type': 'latest_data',
+                'content': 'This is the latest data'
+            }
+            
+            return data
+        except Exception as e:
+            # Handle exceptions
+            return None
+        finally:
+            # Always close connections
+            close_old_connections()

@@ -80,6 +80,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'weather.middleware.CloseOldConnectionsMiddleware',  # Weather middleware
+    'solar.middleware.CloseOldConnectionsMiddleware',    # Solar middleware
+    'system.middleware.CloseOldConnectionsMiddleware',   # System middleware
 ]
 
 ROOT_URLCONF = 'wyandata.urls'
@@ -105,7 +108,7 @@ WSGI_APPLICATION = 'wyandata.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Database configuration with PostgreSQL
+# Database configuration with PostgreSQL and improved connection handling
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -114,16 +117,18 @@ DATABASES = {
         'PASSWORD': 'm1st3r_pl0ppy',        
         'HOST': 'localhost',
         'PORT': '5432',
-        'CONN_MAX_AGE': 600,  # Connection pooling: keep connections open for 10 minutes
+        'CONN_MAX_AGE': 60,  # Reduced from 600 to 60 seconds
         'OPTIONS': {
             'connect_timeout': 10,
         },
+        'ATOMIC_REQUESTS': False,
+        'AUTOCOMMIT': True,
+        'CONN_HEALTH_CHECKS': True,  # Added for Django 4.2+
     }
 }
 
 # Database connection handling for asynchronous environment
 DATABASES_ASYNC_SUPPORT = True
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -143,7 +148,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
@@ -155,10 +159,8 @@ TIME_ZONE = 'America/Denver'
 # Disable timezone support if all your timestamps are already in local time
 USE_TZ = False
 
-
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
-
 STATIC_URL = 'static/'
 
 # Default primary key field type
