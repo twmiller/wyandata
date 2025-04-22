@@ -619,10 +619,32 @@ The system module monitors and collects metrics from various hosts in your infra
 
 Connect to real-time updates via WebSocket:
 ```
-ws://server:8000/ws/system/data/
+ws://server:8000/ws/system/metrics/
 ```
 
-Note: The WebSocket path must match exactly as `/ws/system/data/` (with trailing slash).
+Note: The WebSocket path must match exactly as `/ws/system/metrics/` (with trailing slash).
+
+#### WebSocket Subscription
+
+The system WebSocket implements a subscription model. After connecting, you need to send a subscription message to receive updates for a specific host:
+
+```json
+{
+  "type": "subscribe_host", 
+  "host_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+The server will confirm your subscription with:
+
+```json
+{
+  "type": "subscription_confirmed", 
+  "host_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+After subscription confirmation, you'll receive real-time metrics updates for the specified host.
 
 #### WebSocket Data Format
 

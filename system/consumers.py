@@ -133,6 +133,24 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
                 'type': 'subscription_confirmed',
                 'host_id': host_id
             }))
+            
+            # Send initial metrics data immediately after subscription
+            try:
+                host = await database_sync_to_async(lambda: Host.objects.get(pk=host_id))()
+                
+                # Get some recent metrics for this host
+                metrics = await self.get_host_recent_metrics(host)
+                
+                if metrics:
+                    await self.send(text_data=json.dumps({
+                        'type': 'metrics_update',
+                        'host_id': host_id,
+                        'hostname': host.hostname,
+                        'timestamp': timezone.now().isoformat(),
+                        'metrics': metrics
+                    }))
+            except Exception as e:
+                print(f"Error sending initial metrics: {e}")
     
     async def metrics_message(self, event):
         """Send metrics update to WebSocket clients"""
@@ -263,20 +281,18 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
                 pass
         
         network_interface_name = value_data.get('network_interface')
-        if network_interface_name:
-            try:
+        if network_interface_name:age only
+            try:t subscribes to specific hosts
                 metric_value.network_interface = NetworkInterface.objects.get(
-                    host=host, name=network_interface_name
-                )
+                    host=host, name=network_interface_nametablished',
+                )ics. Please subscribe to specific hosts.'
             except NetworkInterface.DoesNotExist:
-                pass
-        
+                passpt Exception as e:
+        ceptions
         metric_value.save()
         return metric_value
-    
-    @database_sync_to_async
-    def get_latest_data(self):
-        """Fetch the latest data for the client"""
+    ose connections
+    @database_sync_to_asynce_old_connections()            # Always close connections            close_old_connections()    def get_latest_data(self):        """Fetch the latest data for the client"""
         try:
             # Close any old connections before making new queries
             close_old_connections()
@@ -294,4 +310,39 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
             return None
         finally:
             # Always close connections
+            close_old_connections()
+    
+    @database_sync_to_async
+    def get_host_recent_metrics(self, host):
+        """Get recent metrics for a host"""
+        try:
+            close_old_connections()
+            
+            # Get distinct metric types for this host
+            metric_types = MetricType.objects.filter(
+                values__host=host
+            ).distinct()
+            
+            metrics = {}
+            
+            for metric_type in metric_types:
+                # Get latest value for each metric type
+                latest = MetricValue.objects.filter(
+                    host=host, 
+                    metric_type=metric_type
+                ).order_by('-timestamp').first()
+                
+                if latest:
+                    metrics[metric_type.name] = {
+                        'value': latest.value,
+                        'unit': metric_type.unit,
+                        'timestamp': latest.timestamp.isoformat(),
+                        'category': metric_type.category
+                    }
+            
+            return metrics
+        except Exception as e:
+            print(f"Error fetching host metrics: {e}")
+            return {}
+        finally:
             close_old_connections()
