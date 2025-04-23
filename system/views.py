@@ -109,26 +109,24 @@ def get_host_details(request, host_id):
 
 @api_view(['GET'])
 def get_host_metrics_history(request, host_id):
-    """Return historical metrics for a specific host"""
+    """Return historical metrics for a specific host based on count rather than time"""
     try:
         host = Host.objects.get(pk=host_id)
     except Host.DoesNotExist:
         return Response({'error': 'Host not found'}, status=404)
     
-    # Get query parameters
-    hours = min(int(request.GET.get('hours', 3)), 48)  # Default 3, max 48
-    interval_minutes = max(1, min(int(request.GET.get('interval', 5)), 60))
+    # Get query parameters - now using count instead of hours
+    count = min(int(request.GET.get('count', 180)), 1000)  # Default 180 metrics, max 1000
+    interval_minutes = max(1, min(int(request.GET.get('interval', 5)), 60))  # Default 5, min 1, max 60
     
     # Get specific metrics if requested
     requested_metrics = request.GET.get('metrics')
     metric_names = requested_metrics.split(',') if requested_metrics else None
     
     from django.db import connection
-
-    # CRITICAL FIX: Query by timestamp DIRECTLY without time zone conversions
-    # PostgreSQL timestamp comparison in raw SQL
+    
+    # First check if any metrics exist for this host
     with connection.cursor() as cursor:
-        # First check for any actual metrics in the database for this host
         cursor.execute("""
             SELECT COUNT(*), MIN(timestamp), MAX(timestamp)
             FROM system_metricvalue
@@ -145,51 +143,21 @@ def get_host_metrics_history(request, host_id):
             return Response({
                 'host_id': str(host.id),
                 'hostname': host.hostname,
-                'time_range': {
-                    'start': None,
-                    'end': None,
-                    'duration_hours': hours
-                },
-                'interval_minutes': interval_minutes,
                 'metrics': [],
                 'records_found': 0,
                 'debug_info': {
                     'message': 'No records found for this host'
                 }
             })
-            
-        # PROPER FIX: Use database's timestamp arithmetic with explicit interval
-        # This avoids all timezone issues by letting PostgreSQL handle time logic
-        cursor.execute("""
-            SELECT MIN(timestamp), MAX(timestamp), COUNT(*)
-            FROM system_metricvalue
-            WHERE 
-                host_id = %s AND
-                timestamp >= %s::timestamp - INTERVAL '%s hours'
-        """, [
-            host_id, 
-            max_timestamp,  # Use the most recent timestamp as reference
-            hours
-        ])
-        
-        time_data = cursor.fetchone()
-        start_time = time_data[0] 
-        end_time = time_data[1]
-        matched_count = time_data[2]
-        
-        # Get all available metrics
+    
+    # Get all available metric types for this host
+    with connection.cursor() as cursor:
         cursor.execute("""
             SELECT DISTINCT mt.id, mt.name, mt.unit, mt.category
-            FROM system_metricvalue mv
-            JOIN system_metrictype mt ON mv.metric_type_id = mt.id
-            WHERE 
-                mv.host_id = %s AND
-                mv.timestamp >= %s::timestamp - INTERVAL '%s hours'
-        """, [
-            host_id,
-            max_timestamp,  # Use the most recent timestamp
-            hours
-        ])
+            FROM system_metrictype mt
+            JOIN system_metricvalue mv ON mv.metric_type_id = mt.id
+            WHERE mv.host_id = %s
+        """, [host_id])
         
         metric_types = [
             {'id': row[0], 'name': row[1], 'unit': row[2], 'category': row[3]}
@@ -205,7 +173,7 @@ def get_host_metrics_history(request, host_id):
     
     for metric in metric_types:
         with connection.cursor() as cursor:
-            # PROPER FIX: Use the known timestamp range instead of NOW()
+            # Get 'count' most recent readings for this metric type
             cursor.execute("""
                 WITH raw_data AS (
                     SELECT 
@@ -215,14 +183,15 @@ def get_host_metrics_history(request, host_id):
                             WHEN mt.data_type = 'INT' THEN mv.int_value::text::float
                             WHEN mt.data_type = 'BOOL' THEN mv.bool_value::text::float
                             ELSE NULL
-                        END AS value
+                        END AS value,
+                        ROW_NUMBER() OVER (ORDER BY mv.timestamp DESC) as row_num
                     FROM system_metricvalue mv
                     JOIN system_metrictype mt ON mv.metric_type_id = mt.id
                     WHERE 
                         mv.host_id = %s 
                         AND mt.id = %s
-                        AND mv.timestamp >= %s::timestamp - INTERVAL '%s hours'
-                    ORDER BY mv.timestamp
+                    ORDER BY mv.timestamp DESC
+                    LIMIT %s
                 ),
                 bucketed AS (
                     SELECT 
@@ -231,7 +200,7 @@ def get_host_metrics_history(request, host_id):
                         FLOOR(EXTRACT(EPOCH FROM timestamp) / (%s * 60)) AS bucket
                     FROM raw_data
                 )
-                SELECT timestamp, value
+                SELECT timestamp, value 
                 FROM (
                     SELECT 
                         timestamp,
@@ -244,11 +213,11 @@ def get_host_metrics_history(request, host_id):
             """, [
                 host_id,
                 metric['id'],
-                max_timestamp,  # Use the most recent timestamp
-                hours,
+                count,
                 interval_minutes
             ])
             
+            # Process the results
             data_points = [
                 {
                     'timestamp': row[0].isoformat() if row[0] else None,
@@ -265,17 +234,42 @@ def get_host_metrics_history(request, host_id):
                 'data_points': data_points
             })
     
+    # Find time range from the collected data points
+    start_time = None
+    end_time = None
+    duration_minutes = None
+    
+    if metrics_list and any(m['data_points'] for m in metrics_list):
+        # Find earliest and latest timestamps across all metrics
+        all_timestamps = []
+        for metric in metrics_list:
+            for point in metric['data_points']:
+                if point['timestamp']:
+                    all_timestamps.append(point['timestamp'])
+        
+        if all_timestamps:
+            all_timestamps.sort()
+            start_time = all_timestamps[0]
+            end_time = all_timestamps[-1]
+            
+            # Calculate duration in minutes for UI reference
+            from datetime import datetime
+            start_dt = datetime.fromisoformat(start_time)
+            end_dt = datetime.fromisoformat(end_time)
+            duration_seconds = (end_dt - start_dt).total_seconds()
+            duration_minutes = duration_seconds / 60
+    
     return Response({
         'host_id': str(host.id),
         'hostname': host.hostname,
+        'count_requested': count,
         'time_range': {
-            'start': start_time.isoformat() if start_time else None,
-            'end': end_time.isoformat() if end_time else None,
-            'duration_hours': hours
+            'start': start_time,
+            'end': end_time,
+            'duration_minutes': duration_minutes
         },
         'interval_minutes': interval_minutes,
         'metrics': metrics_list,
-        'records_found': matched_count,
         'debug_info': {
             'total_records_for_host': total_count,
             'oldest_record_time': min_timestamp.isoformat() if min_timestamp else None,

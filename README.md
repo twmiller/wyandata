@@ -620,28 +620,32 @@ The system module monitors and collects metrics from various hosts in your infra
   {
     "host_id": "550e8400-e29b-41d4-a716-446655440000",
     "hostname": "webserver01",
+    "count_requested": 180,
     "time_range": {
       "start": "2025-04-20T15:45:22.428584+00:00",
-      "end": "2025-04-20T18:45:22.428584+00:00",
-      "duration_hours": 3.0
+      "end": "2025-04-20T16:15:22.428584+00:00",
+      "duration_minutes": 30.0
     },
     "interval_minutes": 5,
-    "metrics": {
-      "cpu_usage": [
-        {"timestamp": "2025-04-20T15:45:22.428584+00:00", "value": 25.8},
-        {"timestamp": "2025-04-20T15:50:22.428584+00:00", "value": 26.4},
-        {"timestamp": "2025-04-20T15:55:22.428584+00:00", "value": 27.9},
-        // More data points...
-        {"timestamp": "2025-04-20T18:45:22.428584+00:00", "value": 23.5}
-      ],
-      "memory_used": [
-        // Data points at 5-minute intervals...
-      ]
-    }
+    "metrics": [
+      {
+        "name": "cpu_usage",
+        "category": "CPU",
+        "unit": "%",
+        "data_points": [
+          {"timestamp": "2025-04-20T15:45:22.428584+00:00", "value": 25.8},
+          {"timestamp": "2025-04-20T15:50:22.428584+00:00", "value": 26.4},
+          {"timestamp": "2025-04-20T15:55:22.428584+00:00", "value": 27.9},
+          // More data points...
+          {"timestamp": "2025-04-20T16:15:22.428584+00:00", "value": 23.5}
+        ]
+      },
+      // More metrics...
+    ]
   }
   ```
-  *Returns time-series metrics data for a specific host over a period of time. Query parameters:*
-  - `hours`: Number of hours to look back (default: 3, max: 12)
+  *Returns time-series metrics data for a specific host. Query parameters:*
+  - `count`: Number of metrics to retrieve (default: 180, max: 1000)
   - `interval`: Sampling interval in minutes (default: 5, min: 1, max: 60)
   - `metrics`: Comma-separated list of metric names to include (default: all available metrics)
 
