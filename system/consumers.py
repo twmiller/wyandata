@@ -114,11 +114,17 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         metrics = data.get('metrics', {})
         timestamp = timezone.now()
         
-        # Extract ONLY cpu_usage metric for logging
-        cpu_usage = metrics.get('cpu_usage', {}).get('value', 'N/A')
+        # Extract only the cpu_usage metric for logging (if it exists)
+        if 'cpu_usage' in metrics:
+            cpu_value = metrics['cpu_usage'].get('value', 'N/A')
+            print(f"SYSTEM: {hostname} CPU_USAGE={cpu_value}%")
         
-        # Use print for guaranteed output focusing only on cpu_usage
-        print(f"SYSTEM: {hostname} CPU_USAGE={cpu_usage}%")
+        # Also log load average which is often a better indicator of system stress
+        load_1min = metrics.get('load_avg_1min', {}).get('value', 'N/A')
+        mem_percent = metrics.get('memory_percent', {}).get('value', 'N/A')
+        
+        # Print a concise but informative log line 
+        print(f"HOST: {hostname} | CPU: {cpu_value}% | Load: {load_1min} | Memory: {mem_percent}%")
         
         # Ensure host exists
         host = await self.get_host_by_hostname(hostname)
