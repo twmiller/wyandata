@@ -622,9 +622,9 @@ The system module monitors and collects metrics from various hosts in your infra
     "hostname": "webserver01",
     "count_requested": 180,
     "time_range": {
-      "start": "2025-04-20T15:45:22.428584+00:00",
-      "end": "2025-04-20T16:15:22.428584+00:00",
-      "duration_minutes": 30.0
+      "start": "2025-04-22T08:03:14.127654",
+      "end": "2025-04-22T08:35:05.294872",
+      "duration_minutes": 31.85
     },
     "interval_minutes": 5,
     "metrics": [
@@ -633,20 +633,20 @@ The system module monitors and collects metrics from various hosts in your infra
         "category": "CPU",
         "unit": "%",
         "data_points": [
-          {"timestamp": "2025-04-20T15:45:22.428584+00:00", "value": 25.8},
-          {"timestamp": "2025-04-20T15:50:22.428584+00:00", "value": 26.4},
-          {"timestamp": "2025-04-20T15:55:22.428584+00:00", "value": 27.9},
+          {"timestamp": "2025-04-22T08:03:14.127654", "value": 15.2},
+          {"timestamp": "2025-04-22T08:08:22.485921", "value": 18.7},
+          {"timestamp": "2025-04-22T08:13:45.723109", "value": 22.1},
           // More data points...
-          {"timestamp": "2025-04-20T16:15:22.428584+00:00", "value": 23.5}
+          {"timestamp": "2025-04-22T08:35:05.294872", "value": 23.5}
         ]
       },
       // More metrics...
     ]
   }
   ```
-  *Returns time-series metrics data for a specific host. Query parameters:*
-  - `count`: Number of metrics to retrieve (default: 180, max: 1000)
-  - `interval`: Sampling interval in minutes (default: 5, min: 1, max: 60)
+  *Returns time-series metrics data for a specific host. The endpoint retrieves the most recent metrics and groups them by type. Query parameters:*
+  - `count`: Number of most recent metrics to retrieve (default: 180, max: 1000)
+  - `interval`: Sampling interval in minutes for downsampling (default: 5, min: 1, max: 60)
   - `metrics`: Comma-separated list of metric names to include (default: all available metrics)
 
 ### WebSockets

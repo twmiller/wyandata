@@ -143,11 +143,9 @@ def get_host_metrics_history(request, host_id):
             return Response({
                 'host_id': str(host.id),
                 'hostname': host.hostname,
+                'count_requested': count,
                 'metrics': [],
-                'records_found': 0,
-                'debug_info': {
-                    'message': 'No records found for this host'
-                }
+                'records_found': 0
             })
     
     # Get all available metric types for this host
@@ -173,59 +171,42 @@ def get_host_metrics_history(request, host_id):
     
     for metric in metric_types:
         with connection.cursor() as cursor:
-            # Get 'count' most recent readings for this metric type
+            # Get the most recent 'count' metrics for this type and host
             cursor.execute("""
-                WITH raw_data AS (
-                    SELECT 
-                        mv.timestamp, 
-                        CASE 
-                            WHEN mt.data_type = 'FLOAT' THEN mv.float_value
-                            WHEN mt.data_type = 'INT' THEN mv.int_value::text::float
-                            WHEN mt.data_type = 'BOOL' THEN mv.bool_value::text::float
-                            ELSE NULL
-                        END AS value,
-                        ROW_NUMBER() OVER (ORDER BY mv.timestamp DESC) as row_num
-                    FROM system_metricvalue mv
-                    JOIN system_metrictype mt ON mv.metric_type_id = mt.id
-                    WHERE 
-                        mv.host_id = %s 
-                        AND mt.id = %s
-                    ORDER BY mv.timestamp DESC
-                    LIMIT %s
-                ),
-                bucketed AS (
-                    SELECT 
-                        timestamp, 
-                        value,
-                        FLOOR(EXTRACT(EPOCH FROM timestamp) / (%s * 60)) AS bucket
-                    FROM raw_data
-                )
-                SELECT timestamp, value 
-                FROM (
-                    SELECT 
-                        timestamp,
-                        value,
-                        ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY timestamp) AS rn
-                    FROM bucketed
-                ) ranked
-                WHERE rn = 1
-                ORDER BY timestamp;
+                SELECT timestamp, 
+                    CASE 
+                        WHEN mt.data_type = 'FLOAT' THEN mv.float_value
+                        WHEN mt.data_type = 'INT' THEN mv.int_value::text::float
+                        WHEN mt.data_type = 'BOOL' THEN mv.bool_value::text::float
+                        ELSE NULL
+                    END AS value
+                FROM system_metricvalue mv
+                JOIN system_metrictype mt ON mv.metric_type_id = mt.id
+                WHERE 
+                    mv.host_id = %s 
+                    AND mt.id = %s
+                ORDER BY mv.timestamp DESC
+                LIMIT %s
             """, [
                 host_id,
                 metric['id'],
-                count,
-                interval_minutes
+                count
             ])
             
-            # Process the results
+            # Get results and sort by timestamp ascending
+            rows = cursor.fetchall()
             data_points = [
                 {
                     'timestamp': row[0].isoformat() if row[0] else None,
                     'value': float(row[1]) if row[1] is not None else None
                 }
-                for row in cursor.fetchall()
+                for row in rows
             ]
-        
+            
+            # Sort chronologically (oldest first) for easier client-side graphing
+            data_points.sort(key=lambda x: x['timestamp'])
+            
+        # Only include metrics that have data points
         if data_points:
             metrics_list.append({
                 'name': metric['name'],
@@ -243,19 +224,18 @@ def get_host_metrics_history(request, host_id):
         # Find earliest and latest timestamps across all metrics
         all_timestamps = []
         for metric in metrics_list:
-            for point in metric['data_points']:
-                if point['timestamp']:
-                    all_timestamps.append(point['timestamp'])
+            if metric['data_points']:
+                all_timestamps.extend([point['timestamp'] for point in metric['data_points'] if point['timestamp']])
         
         if all_timestamps:
             all_timestamps.sort()
             start_time = all_timestamps[0]
             end_time = all_timestamps[-1]
             
-            # Calculate duration in minutes for UI reference
+            # Calculate duration in minutes
             from datetime import datetime
-            start_dt = datetime.fromisoformat(start_time)
-            end_dt = datetime.fromisoformat(end_time)
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00') if start_time.endswith('Z') else start_time)
+            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00') if end_time.endswith('Z') else end_time)
             duration_seconds = (end_dt - start_dt).total_seconds()
             duration_minutes = duration_seconds / 60
     
@@ -270,9 +250,5 @@ def get_host_metrics_history(request, host_id):
         },
         'interval_minutes': interval_minutes,
         'metrics': metrics_list,
-        'debug_info': {
-            'total_records_for_host': total_count,
-            'oldest_record_time': min_timestamp.isoformat() if min_timestamp else None,
-            'newest_record_time': max_timestamp.isoformat() if max_timestamp else None
-        }
+        'records_found': total_count
     })
