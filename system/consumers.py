@@ -51,19 +51,23 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
     
     async def receive(self, text_data):
         """Handle incoming messages from clients"""
-        print(f"SYSTEM WS RECEIVED: {text_data[:100]}")  # Print raw message to stdout
-        
         try:
             data = json.loads(text_data)
             message_type = data.get('type')
             
-            print(f"SYSTEM MESSAGE TYPE: {message_type} from {data.get('hostname', 'Unknown')}")
+            # Print receiving type for debugging
+            print(f"SYSTEM RECEIVED: {message_type} from {data.get('hostname', 'Unknown')}")
             
+            # Handle different message types properly
             if message_type == 'register_host':
+                # This should happen once per host
                 await self.handle_host_registration(data)
-            elif message_type == 'metrics_update':
+            elif message_type == 'metrics_update' or message_type == 'metrics':
+                # This should be the regular metrics update stream 
+                # Fix to handle both 'metrics_update' and just 'metrics' type
                 await self.handle_metrics_update(data)
             elif message_type == 'subscribe_host':
+                # This is for frontend clients subscribing to updates
                 await self.handle_host_subscription(data)
             else:
                 print(f"SYSTEM UNKNOWN MESSAGE TYPE: {message_type}")
