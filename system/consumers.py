@@ -114,12 +114,11 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         metrics = data.get('metrics', {})
         timestamp = timezone.now()
         
-        # Get key metrics for logging
-        cpu_usage = metrics.get('cpu_usage', {}).get('value', '?')
-        mem_percent = metrics.get('memory_percent', {}).get('value', '?')
+        # Extract ONLY cpu_usage metric for logging
+        cpu_usage = metrics.get('cpu_usage', {}).get('value', 'N/A')
         
-        # Use print directly to bypass all logging configuration issues
-        print(f"SYSTEM METRICS: {hostname} | CPU:{cpu_usage}% | MEM:{mem_percent}% | {len(metrics)} metrics")
+        # Use print for guaranteed output focusing only on cpu_usage
+        print(f"SYSTEM: {hostname} CPU_USAGE={cpu_usage}%")
         
         # Ensure host exists
         host = await self.get_host_by_hostname(hostname)
@@ -130,20 +129,6 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
                 'message': f'Host {hostname} not registered'
             }))
             return
-        
-        # Log the metrics update with key system metrics
-        cpu_usage = metrics.get('cpu_usage', {}).get('value', '?')
-        mem_percent = metrics.get('memory_percent', {}).get('value', '?')
-        
-        # Find any temperature metrics
-        temp_metrics = [f"{k.replace('temp_', '')}={v.get('value', '?')}°C" 
-                      for k, v in metrics.items() 
-                      if k.startswith('temp_') and 'value' in v]
-        temp_info = ' '.join(temp_metrics[:2]) if temp_metrics else 'None'
-        
-        # Log in a format that's guaranteed to show up in console
-        logger.info(f"Metrics from {hostname}: CPU={cpu_usage}% MEM={mem_percent}% "
-                   f"TEMP={temp_info} [{len(metrics)} metrics]")
         
         # Update host's last seen timestamp
         await self.update_host_last_seen(host)
