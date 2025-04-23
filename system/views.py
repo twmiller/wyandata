@@ -128,7 +128,6 @@ def get_host_metrics_history(request, host_id):
     ).distinct()
     
     if metric_names:
-        # Only get the requested metrics - EFFICIENT FILTERING AT DB LEVEL
         metric_types_query = metric_types_query.filter(name__in=metric_names)
     
     # Get the metric types
@@ -138,16 +137,12 @@ def get_host_metrics_history(request, host_id):
     metrics_list = []
     query_start_time = timezone.now()
     
-    # Close any existing connections to ensure we get fresh data
-    from django.db import connections
-    connections['default'].close()
-    
     for metric_type in metric_types:
-        # Get latest values for this metric type using ORM
+        # Get the latest values by primary key instead of timestamp
         values = MetricValue.objects.filter(
             host=host,
             metric_type=metric_type
-        ).order_by('-timestamp')[:count]
+        ).order_by('-id')[:count]  # Order by primary key to get latest inserted
         
         # Convert to list and sort chronologically
         values_list = list(values)
@@ -156,11 +151,10 @@ def get_host_metrics_history(request, host_id):
         # Format data points
         data_points = []
         for value in values_list:
-            if value.timestamp:
-                data_points.append({
-                    'timestamp': value.timestamp.isoformat(),
-                    'value': float(value.value) if value.value is not None else None
-                })
+            data_points.append({
+                'timestamp': value.timestamp.isoformat() if value.timestamp else None,
+                'value': float(value.value) if value.value is not None else None
+            })
         
         if data_points:
             metrics_list.append({
@@ -170,17 +164,16 @@ def get_host_metrics_history(request, host_id):
                 'data_points': data_points
             })
     
-    # Get some metrics for the response
+    # Calculate metrics
     data_points_count = sum(len(m.get('data_points', [])) for m in metrics_list)
     query_duration_ms = (timezone.now() - query_start_time).total_seconds() * 1000
     
-    # Include important debug information
+    # Return with debugging info
     return Response({
         'host_id': str(host.id),
         'hostname': host.hostname,
         'count_requested': count,
         'metrics': metrics_list,
-        'server_time': timezone.now().isoformat(),
         'metrics_count': data_points_count,
         'query_duration_ms': round(query_duration_ms, 2)
     }, headers={
