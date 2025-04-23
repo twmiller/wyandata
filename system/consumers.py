@@ -51,20 +51,32 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
     
     async def receive(self, text_data):
         """Handle incoming messages from clients"""
-        data = json.loads(text_data)
-        message_type = data.get('type')
+        print(f"SYSTEM WS RECEIVED: {text_data[:100]}")  # Print raw message to stdout
         
-        if message_type == 'register_host':
-            await self.handle_host_registration(data)
-        elif message_type == 'metrics_update':
-            await self.handle_metrics_update(data)
-        elif message_type == 'subscribe_host':
-            await self.handle_host_subscription(data)
+        try:
+            data = json.loads(text_data)
+            message_type = data.get('type')
+            
+            print(f"SYSTEM MESSAGE TYPE: {message_type} from {data.get('hostname', 'Unknown')}")
+            
+            if message_type == 'register_host':
+                await self.handle_host_registration(data)
+            elif message_type == 'metrics_update':
+                await self.handle_metrics_update(data)
+            elif message_type == 'subscribe_host':
+                await self.handle_host_subscription(data)
+            else:
+                print(f"SYSTEM UNKNOWN MESSAGE TYPE: {message_type}")
+        except Exception as e:
+            print(f"SYSTEM ERROR PROCESSING MESSAGE: {e}")
     
     async def handle_host_registration(self, data):
         """Register or update a host in the system"""
         hostname = data.get('hostname')
         system_info = data.get('system_info', {})
+        
+        # Use print for guaranteed output
+        print(f"SYSTEM HOST REGISTRATION: {hostname} | {system_info.get('system_type', '?')} | {system_info.get('os_version', '?')}")
         
         # Log the registration directly to stdout
         logger.info(f"Host registered: {hostname} - {system_info.get('system_type', 'unknown')} - "
@@ -101,6 +113,13 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         hostname = data.get('hostname')
         metrics = data.get('metrics', {})
         timestamp = timezone.now()
+        
+        # Get key metrics for logging
+        cpu_usage = metrics.get('cpu_usage', {}).get('value', '?')
+        mem_percent = metrics.get('memory_percent', {}).get('value', '?')
+        
+        # Use print directly to bypass all logging configuration issues
+        print(f"SYSTEM METRICS: {hostname} | CPU:{cpu_usage}% | MEM:{mem_percent}% | {len(metrics)} metrics")
         
         # Ensure host exists
         host = await self.get_host_by_hostname(hostname)

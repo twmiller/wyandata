@@ -122,9 +122,12 @@ def get_host_details(request, host_id):
 @api_view(['GET'])
 def get_host_metrics_history(request, host_id):
     """Return the absolute freshest metrics for a specific host using the Django ORM"""
+    print(f"SYSTEM API: Metrics history request for host {host_id}")
+    
     try:
         host = Host.objects.get(pk=host_id)
     except Host.DoesNotExist:
+        print(f"SYSTEM API: Host not found: {host_id}")
         logger.warning(f"History request for unknown host: {host_id}")
         return Response({'error': 'Host not found'}, status=404)
     
@@ -135,9 +138,8 @@ def get_host_metrics_history(request, host_id):
     requested_metrics = request.GET.get('metrics')
     metric_names = requested_metrics.split(',') if requested_metrics else None
     
-    # Log the request
-    logger.info(f"History request for {host.hostname} ({host_id}): count={count} " + 
-                f"metrics={requested_metrics or 'all'}")
+    # Log the request with print to guarantee we see it
+    print(f"SYSTEM API: History for {host.hostname} | count={count} | metrics={requested_metrics or 'all'}")
     
     # Use Django's ORM to get metric types - filter by name if specified
     metric_types_query = MetricType.objects.filter(
