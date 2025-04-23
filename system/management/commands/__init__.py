@@ -1,1 +1,1 @@
-# This file needs to exist for Django to recognize the commands package
+# This file is intentionally left empty to mark this directory as a Python package
