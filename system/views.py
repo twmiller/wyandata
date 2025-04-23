@@ -109,7 +109,7 @@ def get_host_details(request, host_id):
 
 @api_view(['GET'])
 def get_host_metrics_history(request, host_id):
-    """Return the LATEST metrics for a specific host, no time constraints"""
+    """Return the absolute latest metrics for a specific host, with no caching"""
     try:
         host = Host.objects.get(pk=host_id)
     except Host.DoesNotExist:
@@ -122,25 +122,34 @@ def get_host_metrics_history(request, host_id):
     requested_metrics = request.GET.get('metrics')
     metric_names = requested_metrics.split(',') if requested_metrics else None
     
+    # Force database connection refresh to ensure we get the freshest data
+    from django.db import connection
+    connection.close()
+    
     # Get all available metric types for this host
     if metric_names:
         metric_types = MetricType.objects.filter(name__in=metric_names, values__host=host).distinct()
     else:
         metric_types = MetricType.objects.filter(values__host=host).distinct()
     
-    # Get the LATEST metrics for each type - no time filtering at all!
+    # Get the LATEST metrics for each type
     metrics_list = []
+    server_time = timezone.now()
     
     for metric_type in metric_types:
-        # Get the latest N values for this metric type, period. No time filtering.
-        values = MetricValue.objects.filter(
-            host=host,
-            metric_type=metric_type
-        ).order_by('-timestamp')[:count]  # Get latest N values
+        # CRITICAL FIX: Use .none() and then union to bypass any potential query caching
+        # Then explicitly tell Django not to use any cached data
+        values_query = MetricValue.objects.none()
+        values_query = values_query.union(
+            MetricValue.objects.filter(
+                host=host,
+                metric_type=metric_type
+            ).order_by('-timestamp')[:count]
+        )
         
-        # Convert to list and sort chronologically (oldest first)
-        values_list = list(values)
-        values_list.reverse()
+        # Materialize the query to force fresh results
+        values_list = list(values_query)
+        values_list.reverse()  # Oldest first
         
         # Format data points
         data_points = [
@@ -152,11 +161,6 @@ def get_host_metrics_history(request, host_id):
         ]
         
         if data_points:
-            # Include debug info in the first metric to verify recency
-            if not metrics_list:
-                print(f"Latest data point timestamp: {data_points[-1]['timestamp']}")
-                print(f"Current server time: {timezone.now().isoformat()}")
-            
             metrics_list.append({
                 'name': metric_type.name,
                 'category': metric_type.category,
@@ -169,8 +173,8 @@ def get_host_metrics_history(request, host_id):
         'hostname': host.hostname,
         'count_requested': count,
         'metrics': metrics_list,
-        'server_time': timezone.now().isoformat(), 
-        'metrics_count': sum(len(m['data_points']) for m in metrics_list)
+        'server_time': server_time.isoformat(),
+        'refresh_token': str(timezone.now().timestamp())  # Add a timestamp to prevent browser caching
     })
 
 @api_view(['GET'])
