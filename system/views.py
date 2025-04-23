@@ -200,3 +200,44 @@ def get_host_metrics_history(request, host_id):
         'metrics': metrics_list,
         'total_metrics_in_db': total_count
     })
+
+@api_view(['GET'])
+def get_host_available_metrics(request, host_id):
+    """Return all available metrics for a specific host"""
+    try:
+        host = Host.objects.get(pk=host_id)
+    except Host.DoesNotExist:
+        return Response({'error': 'Host not found'}, status=404)
+    
+    # Get all metric types for this host
+    metric_types = MetricType.objects.filter(
+        values__host=host
+    ).distinct().order_by('category', 'name')
+    
+    # Group metrics by category
+    metrics_by_category = {}
+    for metric_type in metric_types:
+        category = metric_type.category
+        if category not in metrics_by_category:
+            metrics_by_category[category] = []
+        
+        metrics_by_category[category].append({
+            'name': metric_type.name,
+            'description': metric_type.description,
+            'unit': metric_type.unit,
+            'data_type': metric_type.data_type,
+        })
+    
+    # Get latest reading time
+    latest_reading = MetricValue.objects.filter(
+        host=host
+    ).order_by('-timestamp').first()
+    
+    latest_timestamp = latest_reading.timestamp if latest_reading else None
+    
+    return Response({
+        'host_id': str(host.id),
+        'hostname': host.hostname,
+        'latest_data_timestamp': latest_timestamp.isoformat() if latest_timestamp else None,
+        'metrics': metrics_by_category
+    })

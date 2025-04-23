@@ -649,6 +649,152 @@ The system module monitors and collects metrics from various hosts in your infra
   - `interval`: Sampling interval in minutes for downsampling (default: 5, min: 1, max: 60)
   - `metrics`: Comma-separated list of metric names to include (default: all available metrics)
 
+#### Examples of using the metrics parameter:
+
+```
+# Get only CPU usage metrics
+GET /system/api/hosts/550e8400-e29b-41d4-a716-446655440000/metrics/history/?metrics=cpu_usage
+
+# Get multiple specific metrics
+GET /system/api/hosts/550e8400-e29b-41d4-a716-446655440000/metrics/history/?metrics=cpu_usage,memory_used,disk_percent_/
+
+# Get temperature metrics with more data points
+GET /system/api/hosts/550e8400-e29b-41d4-a716-446655440000/metrics/history/?metrics=temp_cpu_0,temp_cpu_1&count=500
+
+# Get network metrics with finer interval
+GET /system/api/hosts/550e8400-e29b-41d4-a716-446655440000/metrics/history/?metrics=net_bytes_recv_eth0,net_bytes_sent_eth0&interval=1
+```
+
+The response structure remains the same, but only includes the requested metrics:
+
+```json
+{
+  "host_id": "550e8400-e29b-41d4-a716-446655440000",
+  "hostname": "webserver01",
+  "count_requested": 180,
+  "data_count": 180,
+  "interval_minutes": 5,
+  "metrics": [
+    {
+      "name": "cpu_usage",
+      "category": "CPU",
+      "unit": "%",
+      "data_points": [
+        {"timestamp": "2025-04-22T08:03:14.127654", "value": 15.2},
+        // More data points...
+      ]
+    }
+  ],
+  "total_metrics_in_db": 8880
+}
+```
+
+- `GET /system/api/hosts/{host_id}/metrics/available/` - Get available metrics for a host
+  ```json
+  {
+    "host_id": "550e8400-e29b-41d4-a716-446655440000",
+    "hostname": "webserver01",
+    "latest_data_timestamp": "2025-04-22T15:42:18.124657",
+    "metrics": {
+      "CPU": [
+        {
+          "name": "cpu_usage",
+          "description": "Overall CPU usage percentage",
+          "unit": "%",
+          "data_type": "FLOAT"
+        },
+        {
+          "name": "cpu_usage_0",
+          "description": "CPU core 0 usage percentage",
+          "unit": "%",
+          "data_type": "FLOAT"
+        },
+        // More CPU metrics
+      ],
+      "MEMORY": [
+        {
+          "name": "memory_used",
+          "description": "Physical memory in use",
+          "unit": "bytes",
+          "data_type": "INT"
+        },
+        // More memory metrics
+      ],
+      "STORAGE": [
+        // Storage metrics
+      ],
+      "NETWORK": [
+        // Network metrics
+      ],
+      "TEMPERATURE": [
+        // Temperature metrics
+      ]
+    }
+  }
+  ```
+  *Returns a categorized list of all metrics available for the specified host. This helps with discovering what metrics can be requested in the history endpoint.*
+
+### Supported System Metrics
+
+The system tracks the following metrics for each host:
+
+#### CPU Metrics
+- `cpu_usage` - Overall CPU usage (%)
+- `cpu_usage_{core}` - Per-core CPU usage (%), e.g., `cpu_usage_0`, `cpu_usage_1`
+- `load_avg_1min` - 1-minute load average
+- `load_avg_5min` - 5-minute load average
+- `load_avg_15min` - 15-minute load average
+
+#### Memory Metrics
+- `memory_used` - Memory usage (bytes)
+- `memory_free` - Free memory (bytes)
+- `memory_percent` - Memory usage (%)
+- `swap_used` - Swap usage (bytes)
+- `swap_free` - Free swap (bytes)
+- `swap_percent` - Swap usage (%)
+
+#### Storage Metrics
+- `disk_used_{mount}` - Storage used on mount point (bytes), e.g., `disk_used_/`, `disk_used_/home`
+- `disk_free_{mount}` - Free storage on mount point (bytes)
+- `disk_percent_{mount}` - Storage usage on mount point (%)
+- `disk_io_read_{device}` - Disk read bytes for device, e.g., `disk_io_read_sda`
+- `disk_io_write_{device}` - Disk write bytes for device
+- `disk_io_busy_{device}` - Disk busy time for device (%)
+
+#### Network Metrics
+- `net_bytes_sent_{interface}` - Network bytes sent on interface, e.g., `net_bytes_sent_enp1s0`
+- `net_bytes_recv_{interface}` - Network bytes received on interface
+- `net_packets_sent_{interface}` - Network packets sent on interface
+- `net_packets_recv_{interface}` - Network packets received on interface
+- `net_errin_{interface}` - Incoming packet errors on interface
+- `net_errout_{interface}` - Outgoing packet errors on interface
+
+#### Process Metrics
+- `process_count` - Total number of processes
+- `thread_count` - Total number of threads
+- `zombie_count` - Number of zombie processes
+
+#### Temperature Metrics
+- `temp_cpu_{sensor}` - CPU temperature (°C), e.g., `temp_cpu_0`, `temp_cpu_1`
+- `temp_acpitz_{sensor}` - ACPI thermal zone temperature (°C)
+- `temp_nvme_{device}` - NVMe drive temperature (°C)
+- `temp_coretemp_{core}` - CPU core temperature (°C)
+- `temp_pch_{chipset}` - Platform controller hub temperature (°C)
+- `temp_iwlwifi_{sensor}` - WiFi adapter temperature (°C)
+- `temp_gpu_{sensor}` - GPU temperature (°C)
+
+#### GPU Metrics (if available)
+- `gpu_usage` - GPU utilization (%)
+- `gpu_memory_used` - GPU memory usage (bytes)
+- `gpu_memory_percent` - GPU memory usage (%)
+- `gpu_temp` - GPU temperature (°C)
+- `gpu_power` - GPU power consumption (W)
+
+#### System Metrics
+- `uptime` - System uptime (seconds)
+- `boot_time` - System boot time (timestamp)
+- `users_logged_in` - Number of logged-in users
+
 ### WebSockets
 
 Connect to real-time updates via WebSocket:

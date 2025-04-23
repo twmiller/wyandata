@@ -8,4 +8,5 @@ urlpatterns = [
     path('api/hosts/<uuid:host_id>/metrics/', views.get_host_metrics, name='api_host_metrics'),
     path('api/hosts/<uuid:host_id>/', views.get_host_details, name='api_host_details'),
     path('api/hosts/<uuid:host_id>/metrics/history/', views.get_host_metrics_history, name='api_host_metrics_history'),
+    path('api/hosts/<uuid:host_id>/metrics/available/', views.get_host_available_metrics, name='api_host_available_metrics'),
 ]
