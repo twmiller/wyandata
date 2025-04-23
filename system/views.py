@@ -138,19 +138,15 @@ def get_host_metrics_history(request, host_id):
     query_start_time = timezone.now()
     
     for metric_type in metric_types:
-        # Get the latest values by primary key instead of timestamp
+        # Get the latest values by primary key
         values = MetricValue.objects.filter(
             host=host,
             metric_type=metric_type
-        ).order_by('-id')[:count]  # Order by primary key to get latest inserted
+        ).order_by('-id')[:count]
         
-        # Convert to list and sort chronologically
-        values_list = list(values)
-        values_list.reverse()  # Oldest first
-        
-        # Format data points
+        # Format data points - KEEP THE ORIGINAL ORDER
         data_points = []
-        for value in values_list:
+        for value in values:
             data_points.append({
                 'timestamp': value.timestamp.isoformat() if value.timestamp else None,
                 'value': float(value.value) if value.value is not None else None
