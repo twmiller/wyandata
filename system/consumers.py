@@ -1,5 +1,3 @@
-# system/consumers.py
-
 import asyncio
 import json
 import logging
@@ -25,10 +23,15 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         """Handle WebSocket connection"""
         # Print connection details for debugging
-        print(f"SYSTEM WEBSOCKET CONNECT: Client connected from {self.scope['client']}")
+        client_addr = f"{self.scope['client'][0]}:{self.scope['client'][1]}"
+        print(f"CONNECTION: Client {client_addr} connected")
+        
+        # Store client address for logging
+        self.client_addr = client_addr
         
         # Store the heartbeat task so we can cancel it later
         self.heartbeat_task = None
+        self.hostname = None  # Will be set during registration
         
         # Join a group for all system metrics
         self.room_group_name = 'all_systems'
@@ -47,16 +50,16 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
     
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection"""
-        # Print disconnection details for debugging
-        print(f"SYSTEM WEBSOCKET DISCONNECT: Client {self.scope['client']} disconnected with code: {close_code}")
-        
         # Cancel the heartbeat task if it exists
         if self.heartbeat_task:
             self.heartbeat_task.cancel()
             try:
                 await self.heartbeat_task
             except asyncio.CancelledError:
-                pass
+                pass  # Expected when canceling
+            
+        hostname_info = f" ({self.hostname})" if self.hostname else ""
+        print(f"DISCONNECTION: Client {self.client_addr}{hostname_info} disconnected with code {close_code}")
         
         # Leave the group
         await self.channel_layer.group_discard(
@@ -72,54 +75,45 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         try:
             data = json.loads(text_data)
             message_type = data.get('type')
-            
-            # Print receiving type for debugging
-            print(f"SYSTEM RECEIVED: {message_type} from {data.get('hostname', 'Unknown')}")
+            hostname = data.get('hostname', 'Unknown')
             
             # Handle different message types properly
             if message_type == 'register_host':
                 # This should happen once per host
                 await self.handle_host_registration(data)
             elif message_type == 'metrics_update' or message_type == 'metrics':
-                # This should be the regular metrics update stream 
-                # Fix to handle both 'metrics_update' and just 'metrics' type
+                # Just log that metrics were received without details
+                print(f"METRICS: Received from {hostname}")
                 await self.handle_metrics_update(data)
             elif message_type == 'subscribe_host':
                 # This is for frontend clients subscribing to updates
                 await self.handle_host_subscription(data)
+            elif message_type == 'heartbeat_ack':
+                # Client acknowledges heartbeat
+                print(f"HEARTBEAT: ACK from {hostname}")
             else:
-                print(f"SYSTEM UNKNOWN MESSAGE TYPE: {message_type}")
+                print(f"UNKNOWN: Message type '{message_type}' from {hostname}")
         except Exception as e:
-            print(f"SYSTEM ERROR PROCESSING MESSAGE: {e}")
+            print(f"ERROR: Processing message: {e}")
     
     async def handle_host_registration(self, data):
         """Register or update a host in the system"""
         hostname = data.get('hostname')
-        system_info = data.get('system_info', {})
+        self.hostname = hostname  # Store hostname for logging
         
-        # Use print for guaranteed output including a flag if this is a re-registration
-        print(f"SYSTEM REGISTRATION: {hostname} | {system_info.get('system_type', '?')} | {system_info.get('os_version', '?')}")
+        # Log registration event only
+        print(f"REGISTRATION: Host {hostname} registered from {self.client_addr}")
         
-        # Create or update host record
-        host = await self.update_host_record(hostname, system_info)
+        # Create or update host record and related data
+        host = await self.update_host_record(hostname, data.get('system_info', {}))
         
-        # Update storage devices
         if 'storage_devices' in data:
-            storage_count = len(data['storage_devices'])
-            total_storage = sum(dev.get('total_bytes', 0) for dev in data['storage_devices'])
-            logger.info(f"Host {hostname} storage: {storage_count} devices = "
-                       f"{total_storage / (1024**3):.1f} GB")
             await self.update_storage_devices(host, data['storage_devices'])
         
-        # Update network interfaces
         if 'network_interfaces' in data:
-            interfaces = data['network_interfaces']
-            logger.info(f"Host {hostname} reported {len(interfaces)} network interfaces: "
-                       f"{', '.join(i.get('name', '?') for i in interfaces)}")
-            await self.update_network_interfaces(host, interfaces)
+            await self.update_network_interfaces(host, data['network_interfaces'])
         
-        # Confirm registration but DON'T close the connection
-        # Just send a confirmation message with the host_id
+        # Confirm registration
         await self.send(text_data=json.dumps({
             'type': 'registration_confirmed',
             'host_id': str(host.id),
@@ -127,13 +121,12 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
             'message': 'Host registered successfully. Keep the connection open for sending metrics.'
         }))
         
-        print(f"SYSTEM: Confirmed registration for {hostname} - CONNECTION KEPT OPEN")
-        
         # Start the heartbeat mechanism to keep the connection alive
-        self.heartbeat_task = asyncio.create_task(self.send_heartbeat(hostname))
-        
-        # Return to ensure we don't fall through to any other code
-        return
+        if self.heartbeat_task:
+            self.heartbeat_task.cancel()
+            
+        # Create a new heartbeat task with weak reference to avoid holding connection
+        self.heartbeat_task = asyncio.create_task(self.send_heartbeat())
     
     async def handle_metrics_update(self, data):
         """Process incoming metrics from client agents"""
@@ -141,23 +134,10 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         metrics = data.get('metrics', {})
         timestamp = timezone.now()
         
-        # Extract only the cpu_usage metric for logging (if it exists)
-        cpu_value = 'N/A'
-        if 'cpu_usage' in metrics:
-            cpu_value = metrics['cpu_usage'].get('value', 'N/A')
-            print(f"SYSTEM: {hostname} CPU_USAGE={cpu_value}%")
-        
-        # Also log load average which is often a better indicator of system stress
-        load_1min = metrics.get('load_avg_1min', {}).get('value', 'N/A')
-        mem_percent = metrics.get('memory_percent', {}).get('value', 'N/A')
-        
-        # Print a concise but informative log line 
-        print(f"HOST: {hostname} | CPU: {cpu_value}% | Load: {load_1min} | Memory: {mem_percent}%")
-        
         # Ensure host exists
         host = await self.get_host_by_hostname(hostname)
         if not host:
-            logger.warning(f"Rejected metrics from unknown host: {hostname}")
+            print(f"ERROR: Metrics rejected - unknown host {hostname}")
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'message': f'Host {hostname} not registered'
@@ -167,7 +147,7 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         # Update host's last seen timestamp
         await self.update_host_last_seen(host)
         
-        # Store metrics
+        # Store metrics without printing details
         for metric_name, value_data in metrics.items():
             await self.store_metric(host, metric_name, value_data, timestamp)
         
@@ -201,8 +181,7 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         
         # Add the client to the host-specific group
         if host_id:
-            # Log the subscription
-            logger.info(f"Client subscribed to host: {host_id}")
+            print(f"SUBSCRIPTION: Client {self.client_addr} subscribed to host {host_id}")
             
             await self.channel_layer.group_add(
                 f'host_{host_id}',
@@ -230,30 +209,40 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
                         'metrics': metrics
                     }))
             except Exception as e:
-                print(f"Error sending initial metrics: {e}")
+                print(f"ERROR: Sending initial metrics: {e}")
     
     async def metrics_message(self, event):
         """Send metrics update to WebSocket clients"""
         # Forward the message to the WebSocket
         await self.send(text_data=json.dumps(event))
     
-    async def send_heartbeat(self, hostname):
+    async def send_heartbeat(self):
         """Send periodic pings to keep the connection alive"""
         try:
             while True:
-                # Send a ping every 30 seconds
-                await asyncio.sleep(30)
+                # Wait before sending first heartbeat
+                await asyncio.sleep(25)
+                
+                # Check if connection is still open
+                if not self.channel_name:
+                    print(f"HEARTBEAT: Stopping for {self.hostname} - connection closed")
+                    return
+                
+                print(f"HEARTBEAT: Sending to {self.hostname}")
+                
+                # Send a ping 
                 await self.send(text_data=json.dumps({
                     'type': 'heartbeat',
-                    'timestamp': timezone.now().isoformat(),
-                    'message': f'Keep-alive ping for {hostname}'
+                    'timestamp': timezone.now().isoformat()
                 }))
-                print(f"SYSTEM HEARTBEAT: Sent ping to {hostname}")
+                
+                # Wait for the next heartbeat
+                await asyncio.sleep(25)
         except asyncio.CancelledError:
             # Task was cancelled - this is expected during disconnect
-            pass
+            print(f"HEARTBEAT: Task cancelled for {self.hostname}")
         except Exception as e:
-            print(f"SYSTEM ERROR: Heartbeat error for {hostname}: {e}")
+            print(f"ERROR: Heartbeat for {self.hostname}: {e}")
     
     # Database helper methods
     @database_sync_to_async
