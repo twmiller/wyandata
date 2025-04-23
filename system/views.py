@@ -109,41 +109,38 @@ def get_host_details(request, host_id):
 
 @api_view(['GET'])
 def get_host_metrics_history(request, host_id):
-    """Return historical metrics for a specific host based on count rather than time"""
+    """Return the LATEST metrics for a specific host, no time constraints"""
     try:
         host = Host.objects.get(pk=host_id)
     except Host.DoesNotExist:
         return Response({'error': 'Host not found'}, status=404)
     
-    # Get query parameters - using count instead of hours
-    count = min(int(request.GET.get('count', 180)), 1000)  # Default 180 metrics, max 1000
-    interval_minutes = max(1, min(int(request.GET.get('interval', 5)), 60))  # Default 5, min 1, max 60
+    # Get query parameters
+    count = min(int(request.GET.get('count', 60)), 1000)  # Default 60 metrics, max 1000
     
     # Get specific metrics if requested
     requested_metrics = request.GET.get('metrics')
     metric_names = requested_metrics.split(',') if requested_metrics else None
     
-    # Get total count of metrics for this host for debugging
-    total_count = MetricValue.objects.filter(host=host).count()
-    
     # Get all available metric types for this host
-    metric_types = MetricType.objects.filter(values__host=host).distinct()
-    
     if metric_names:
-        metric_types = metric_types.filter(name__in=metric_names)
+        metric_types = MetricType.objects.filter(name__in=metric_names, values__host=host).distinct()
+    else:
+        metric_types = MetricType.objects.filter(values__host=host).distinct()
     
-    # Get data for each metric type
+    # Get the LATEST metrics for each type - no time filtering at all!
     metrics_list = []
     
     for metric_type in metric_types:
-        # Get latest 'count' metrics for this type
+        # Get the latest N values for this metric type, period. No time filtering.
         values = MetricValue.objects.filter(
-            host=host, 
+            host=host,
             metric_type=metric_type
-        ).order_by('-timestamp')[:count]
+        ).order_by('-timestamp')[:count]  # Get latest N values
         
-        # Re-sort chronologically for the response
-        values = sorted(values, key=lambda x: x.timestamp)
+        # Convert to list and sort chronologically (oldest first)
+        values_list = list(values)
+        values_list.reverse()
         
         # Format data points
         data_points = [
@@ -151,10 +148,15 @@ def get_host_metrics_history(request, host_id):
                 'timestamp': value.timestamp.isoformat() if value.timestamp else None,
                 'value': float(value.value) if value.value is not None else None
             }
-            for value in values
+            for value in values_list
         ]
         
         if data_points:
+            # Include debug info in the first metric to verify recency
+            if not metrics_list:
+                print(f"Latest data point timestamp: {data_points[-1]['timestamp']}")
+                print(f"Current server time: {timezone.now().isoformat()}")
+            
             metrics_list.append({
                 'name': metric_type.name,
                 'category': metric_type.category,
@@ -162,43 +164,13 @@ def get_host_metrics_history(request, host_id):
                 'data_points': data_points
             })
     
-    # Find time range from the collected data points if any exist
-    start_time = None
-    end_time = None
-    duration_minutes = None
-    
-    all_timestamps = []
-    for metric in metrics_list:
-        for point in metric.get('data_points', []):
-            if point.get('timestamp'):
-                all_timestamps.append(point['timestamp'])
-    
-    if all_timestamps:
-        all_timestamps.sort()
-        start_time = all_timestamps[0]
-        end_time = all_timestamps[-1]
-        
-        # Calculate duration
-        from datetime import datetime
-        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00') 
-                                         if start_time.endswith('Z') else start_time)
-        end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00') 
-                                       if end_time.endswith('Z') else end_time)
-        duration_minutes = (end_dt - start_dt).total_seconds() / 60
-    
     return Response({
         'host_id': str(host.id),
         'hostname': host.hostname,
         'count_requested': count,
-        'data_count': sum(len(m.get('data_points', [])) for m in metrics_list),
-        'time_range': {
-            'start': start_time,
-            'end': end_time,
-            'duration_minutes': duration_minutes
-        },
-        'interval_minutes': interval_minutes,
         'metrics': metrics_list,
-        'total_metrics_in_db': total_count
+        'server_time': timezone.now().isoformat(), 
+        'metrics_count': sum(len(m['data_points']) for m in metrics_list)
     })
 
 @api_view(['GET'])
