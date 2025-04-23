@@ -115,7 +115,7 @@ def get_host_metrics_history(request, host_id):
     except Host.DoesNotExist:
         return Response({'error': 'Host not found'}, status=404)
     
-    # Get query parameters - now using count instead of hours
+    # Get query parameters - using count instead of hours
     count = min(int(request.GET.get('count', 180)), 1000)  # Default 180 metrics, max 1000
     interval_minutes = max(1, min(int(request.GET.get('interval', 5)), 60))  # Default 5, min 1, max 60
     
@@ -123,126 +123,74 @@ def get_host_metrics_history(request, host_id):
     requested_metrics = request.GET.get('metrics')
     metric_names = requested_metrics.split(',') if requested_metrics else None
     
-    from django.db import connection
-    
-    # First check if any metrics exist for this host
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT COUNT(*), MIN(timestamp), MAX(timestamp)
-            FROM system_metricvalue
-            WHERE host_id = %s
-        """, [host_id])
-        
-        count_data = cursor.fetchone()
-        total_count = count_data[0]
-        min_timestamp = count_data[1]
-        max_timestamp = count_data[2]
-        
-        if total_count == 0:
-            # No data for this host at all
-            return Response({
-                'host_id': str(host.id),
-                'hostname': host.hostname,
-                'count_requested': count,
-                'metrics': [],
-                'records_found': 0
-            })
+    # Get total count of metrics for this host for debugging
+    total_count = MetricValue.objects.filter(host=host).count()
     
     # Get all available metric types for this host
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT DISTINCT mt.id, mt.name, mt.unit, mt.category
-            FROM system_metrictype mt
-            JOIN system_metricvalue mv ON mv.metric_type_id = mt.id
-            WHERE mv.host_id = %s
-        """, [host_id])
-        
-        metric_types = [
-            {'id': row[0], 'name': row[1], 'unit': row[2], 'category': row[3]}
-            for row in cursor.fetchall()
-        ]
+    metric_types = MetricType.objects.filter(values__host=host).distinct()
     
-    # Filter metric types if requested
     if metric_names:
-        metric_types = [m for m in metric_types if m['name'] in metric_names]
+        metric_types = metric_types.filter(name__in=metric_names)
     
     # Get data for each metric type
     metrics_list = []
     
-    for metric in metric_types:
-        with connection.cursor() as cursor:
-            # Get the most recent 'count' metrics for this type and host
-            cursor.execute("""
-                SELECT timestamp, 
-                    CASE 
-                        WHEN mt.data_type = 'FLOAT' THEN mv.float_value
-                        WHEN mt.data_type = 'INT' THEN mv.int_value::text::float
-                        WHEN mt.data_type = 'BOOL' THEN mv.bool_value::text::float
-                        ELSE NULL
-                    END AS value
-                FROM system_metricvalue mv
-                JOIN system_metrictype mt ON mv.metric_type_id = mt.id
-                WHERE 
-                    mv.host_id = %s 
-                    AND mt.id = %s
-                ORDER BY mv.timestamp DESC
-                LIMIT %s
-            """, [
-                host_id,
-                metric['id'],
-                count
-            ])
-            
-            # Get results and sort by timestamp ascending
-            rows = cursor.fetchall()
-            data_points = [
-                {
-                    'timestamp': row[0].isoformat() if row[0] else None,
-                    'value': float(row[1]) if row[1] is not None else None
-                }
-                for row in rows
-            ]
-            
-            # Sort chronologically (oldest first) for easier client-side graphing
-            data_points.sort(key=lambda x: x['timestamp'])
-            
-        # Only include metrics that have data points
+    for metric_type in metric_types:
+        # Get latest 'count' metrics for this type
+        values = MetricValue.objects.filter(
+            host=host, 
+            metric_type=metric_type
+        ).order_by('-timestamp')[:count]
+        
+        # Re-sort chronologically for the response
+        values = sorted(values, key=lambda x: x.timestamp)
+        
+        # Format data points
+        data_points = [
+            {
+                'timestamp': value.timestamp.isoformat() if value.timestamp else None,
+                'value': float(value.value) if value.value is not None else None
+            }
+            for value in values
+        ]
+        
         if data_points:
             metrics_list.append({
-                'name': metric['name'],
-                'category': metric['category'],
-                'unit': metric['unit'],
+                'name': metric_type.name,
+                'category': metric_type.category,
+                'unit': metric_type.unit,
                 'data_points': data_points
             })
     
-    # Find time range from the collected data points
+    # Find time range from the collected data points if any exist
     start_time = None
     end_time = None
     duration_minutes = None
     
-    if metrics_list and any(m['data_points'] for m in metrics_list):
-        # Find earliest and latest timestamps across all metrics
-        all_timestamps = []
-        for metric in metrics_list:
-            if metric['data_points']:
-                all_timestamps.extend([point['timestamp'] for point in metric['data_points'] if point['timestamp']])
+    all_timestamps = []
+    for metric in metrics_list:
+        for point in metric.get('data_points', []):
+            if point.get('timestamp'):
+                all_timestamps.append(point['timestamp'])
+    
+    if all_timestamps:
+        all_timestamps.sort()
+        start_time = all_timestamps[0]
+        end_time = all_timestamps[-1]
         
-        if all_timestamps:
-            all_timestamps.sort()
-            start_time = all_timestamps[0]
-            end_time = all_timestamps[-1]
-            
-            # Calculate duration in minutes
-            from datetime import datetime
-            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00') if start_time.endswith('Z') else start_time)
-            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00') if end_time.endswith('Z') else end_time)
-            duration_seconds = (end_dt - start_dt).total_seconds()
-            duration_minutes = duration_seconds / 60
+        # Calculate duration
+        from datetime import datetime
+        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00') 
+                                         if start_time.endswith('Z') else start_time)
+        end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00') 
+                                       if end_time.endswith('Z') else end_time)
+        duration_minutes = (end_dt - start_dt).total_seconds() / 60
     
     return Response({
         'host_id': str(host.id),
         'hostname': host.hostname,
         'count_requested': count,
+        'data_count': sum(len(m.get('data_points', [])) for m in metrics_list),
         'time_range': {
             'start': start_time,
             'end': end_time,
@@ -250,5 +198,5 @@ def get_host_metrics_history(request, host_id):
         },
         'interval_minutes': interval_minutes,
         'metrics': metrics_list,
-        'records_found': total_count
+        'total_metrics_in_db': total_count
     })
