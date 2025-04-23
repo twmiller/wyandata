@@ -1,5 +1,6 @@
 # system/consumers.py
 
+import asyncio
 import json
 import logging
 import sys
@@ -26,6 +27,9 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         # Print connection details for debugging
         print(f"SYSTEM WEBSOCKET CONNECT: Client connected from {self.scope['client']}")
         
+        # Store the heartbeat task so we can cancel it later
+        self.heartbeat_task = None
+        
         # Join a group for all system metrics
         self.room_group_name = 'all_systems'
         
@@ -45,6 +49,14 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         """Handle WebSocket disconnection"""
         # Print disconnection details for debugging
         print(f"SYSTEM WEBSOCKET DISCONNECT: Client {self.scope['client']} disconnected with code: {close_code}")
+        
+        # Cancel the heartbeat task if it exists
+        if self.heartbeat_task:
+            self.heartbeat_task.cancel()
+            try:
+                await self.heartbeat_task
+            except asyncio.CancelledError:
+                pass
         
         # Leave the group
         await self.channel_layer.group_discard(
@@ -116,6 +128,9 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         }))
         
         print(f"SYSTEM: Confirmed registration for {hostname} - CONNECTION KEPT OPEN")
+        
+        # Start the heartbeat mechanism to keep the connection alive
+        self.heartbeat_task = asyncio.create_task(self.send_heartbeat(hostname))
         
         # Return to ensure we don't fall through to any other code
         return
@@ -222,12 +237,23 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         # Forward the message to the WebSocket
         await self.send(text_data=json.dumps(event))
     
-    async def heartbeat(self):
-        """Send periodic heartbeat messages to keep the connection alive"""
-        await self.send(text_data=json.dumps({
-            'type': 'heartbeat',
-            'timestamp': timezone.now().isoformat()
-        }))
+    async def send_heartbeat(self, hostname):
+        """Send periodic pings to keep the connection alive"""
+        try:
+            while True:
+                # Send a ping every 30 seconds
+                await asyncio.sleep(30)
+                await self.send(text_data=json.dumps({
+                    'type': 'heartbeat',
+                    'timestamp': timezone.now().isoformat(),
+                    'message': f'Keep-alive ping for {hostname}'
+                }))
+                print(f"SYSTEM HEARTBEAT: Sent ping to {hostname}")
+        except asyncio.CancelledError:
+            # Task was cancelled - this is expected during disconnect
+            pass
+        except Exception as e:
+            print(f"SYSTEM ERROR: Heartbeat error for {hostname}: {e}")
     
     # Database helper methods
     @database_sync_to_async
