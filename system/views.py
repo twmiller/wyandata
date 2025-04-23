@@ -7,6 +7,18 @@ from django.utils import timezone
 from .models import Host, MetricValue, MetricType
 from django.conf import settings
 import pytz  # Import pytz for timezone handling
+import logging
+import sys
+
+# Set up a logger that will definitely output to the console
+logger = logging.getLogger('system.views')
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('API: %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False  # Prevent duplicate logs
 
 @api_view(['GET'])
 def get_hosts(request):
@@ -113,6 +125,7 @@ def get_host_metrics_history(request, host_id):
     try:
         host = Host.objects.get(pk=host_id)
     except Host.DoesNotExist:
+        logger.warning(f"History request for unknown host: {host_id}")
         return Response({'error': 'Host not found'}, status=404)
     
     # Get query parameters
@@ -121,6 +134,10 @@ def get_host_metrics_history(request, host_id):
     # Get specific metrics if requested
     requested_metrics = request.GET.get('metrics')
     metric_names = requested_metrics.split(',') if requested_metrics else None
+    
+    # Log the request
+    logger.info(f"History request for {host.hostname} ({host_id}): count={count} " + 
+                f"metrics={requested_metrics or 'all'}")
     
     # Use Django's ORM to get metric types - filter by name if specified
     metric_types_query = MetricType.objects.filter(
@@ -184,7 +201,11 @@ def get_host_available_metrics(request, host_id):
     try:
         host = Host.objects.get(pk=host_id)
     except Host.DoesNotExist:
+        logger.warning(f"Available metrics request for unknown host: {host_id}")
         return Response({'error': 'Host not found'}, status=404)
+    
+    # Log the request
+    logger.info(f"Available metrics request for {host.hostname} ({host_id})")
     
     # Get all metric types for this host
     metric_types = MetricType.objects.filter(

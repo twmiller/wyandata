@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sys
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.utils import timezone
@@ -9,8 +10,15 @@ from django.db import close_old_connections
 from .models import Host, MetricType, MetricValue, StorageDevice, NetworkInterface
 from .db_utils import with_retry
 
-# Set up logger for this module
-logger = logging.getLogger(__name__)
+# Set up a logger that will definitely output to the console
+logger = logging.getLogger('system.consumers')
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.INFO)
+formatter = logging.Formatter('SYSTEM: %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False  # Prevent duplicate logs
 
 class SystemMetricsConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -58,11 +66,10 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         hostname = data.get('hostname')
         system_info = data.get('system_info', {})
         
-        # Log the registration attempt
-        logger.info(f"Host registration from {hostname} - System: {system_info.get('system_type', 'unknown')} "
-                   f"OS: {system_info.get('os_version', 'unknown')} "
-                   f"CPU: {system_info.get('cpu_model', 'unknown')} "
-                   f"Cores: {system_info.get('cpu_cores', '?')}")
+        # Log the registration directly to stdout
+        logger.info(f"Host registered: {hostname} - {system_info.get('system_type', 'unknown')} - "
+                    f"{system_info.get('os_version', 'unknown')} - "
+                    f"CPU: {system_info.get('cpu_model', 'unknown')[:30]}...")
         
         # Create or update host record
         host = await self.update_host_record(hostname, system_info)
@@ -71,8 +78,8 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         if 'storage_devices' in data:
             storage_count = len(data['storage_devices'])
             total_storage = sum(dev.get('total_bytes', 0) for dev in data['storage_devices'])
-            logger.info(f"Host {hostname} reported {storage_count} storage devices "
-                       f"({total_storage / (1024**3):.2f} GB total)")
+            logger.info(f"Host {hostname} storage: {storage_count} devices = "
+                       f"{total_storage / (1024**3):.1f} GB")
             await self.update_storage_devices(host, data['storage_devices'])
         
         # Update network interfaces
@@ -98,7 +105,7 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         # Ensure host exists
         host = await self.get_host_by_hostname(hostname)
         if not host:
-            logger.warning(f"Metrics update from unregistered host: {hostname}")
+            logger.warning(f"Rejected metrics from unknown host: {hostname}")
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'message': f'Host {hostname} not registered'
@@ -110,13 +117,14 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         mem_percent = metrics.get('memory_percent', {}).get('value', '?')
         
         # Find any temperature metrics
-        temp_metrics = [f"{k}={v.get('value', '?')}°C" 
+        temp_metrics = [f"{k.replace('temp_', '')}={v.get('value', '?')}°C" 
                       for k, v in metrics.items() 
                       if k.startswith('temp_') and 'value' in v]
         temp_info = ' '.join(temp_metrics[:2]) if temp_metrics else 'None'
         
-        logger.info(f"Metrics update from {hostname} - CPU: {cpu_usage}% MEM: {mem_percent}% "
-                   f"TEMP: {temp_info} ({len(metrics)} metrics)")
+        # Log in a format that's guaranteed to show up in console
+        logger.info(f"Metrics from {hostname}: CPU={cpu_usage}% MEM={mem_percent}% "
+                   f"TEMP={temp_info} [{len(metrics)} metrics]")
         
         # Update host's last seen timestamp
         await self.update_host_last_seen(host)
@@ -155,6 +163,9 @@ class SystemMetricsConsumer(AsyncWebsocketConsumer):
         
         # Add the client to the host-specific group
         if host_id:
+            # Log the subscription
+            logger.info(f"Client subscribed to host: {host_id}")
+            
             await self.channel_layer.group_add(
                 f'host_{host_id}',
                 self.channel_name
