@@ -6,7 +6,13 @@ import uuid
 class Host(models.Model):
     """Represents a monitored system in the infrastructure"""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    client_id = models.UUIDField(unique=True, null=True, blank=True, 
+                                 help_text="Client-generated persistent UUID")
     hostname = models.CharField(max_length=255)
+    short_name = models.CharField(max_length=100, blank=True, 
+                                  help_text="User-friendly short name for this host")
+    description = models.TextField(blank=True, 
+                                   help_text="Description of this host's purpose or location")
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     system_type = models.CharField(max_length=50, choices=[
         ('LINUX', 'Linux'),
