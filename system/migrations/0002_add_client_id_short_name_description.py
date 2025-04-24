@@ -1,28 +1,17 @@
-# Generated manually
+# Delete this file and replace it with an empty file that just ensures compatibility
+# with systems that might have already applied this migration
 
-from django.db import migrations, models
-import uuid
+from django.db import migrations
 
 class Migration(migrations.Migration):
-
+    """
+    This migration is now a no-op since we've incorporated these changes
+    into the initial migration. We're keeping this file to maintain compatibility.
+    """
     dependencies = [
-        ('system', '0001_initial'),  # Adjust this to your actual initial migration
+        ('system', '0001_initial'),
     ]
 
     operations = [
-        migrations.AddField(
-            model_name='host',
-            name='client_id',
-            field=models.UUIDField(blank=True, help_text='Client-generated persistent UUID', null=True, unique=True),
-        ),
-        migrations.AddField(
-            model_name='host',
-            name='short_name',
-            field=models.CharField(blank=True, help_text='User-friendly short name for this host', max_length=100),
-        ),
-        migrations.AddField(
-            model_name='host',
-            name='description',
-            field=models.TextField(blank=True, help_text="Description of this host's purpose or location"),
-        ),
+        # Empty operations - these fields are already in the initial migration
     ]

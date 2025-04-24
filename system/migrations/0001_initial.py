@@ -1,4 +1,4 @@
-# Generated manually
+# Generated manually to fix migration issues
 
 from django.db import migrations, models
 import django.db.models.deletion
@@ -17,7 +17,10 @@ class Migration(migrations.Migration):
             name='Host',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ('client_id', models.UUIDField(blank=True, help_text='Client-generated persistent UUID', null=True, unique=True)),
                 ('hostname', models.CharField(max_length=255)),
+                ('short_name', models.CharField(blank=True, help_text='User-friendly short name for this host', max_length=100)),
+                ('description', models.TextField(blank=True, help_text="Description of this host's purpose or location")),
                 ('ip_address', models.GenericIPAddressField(blank=True, null=True)),
                 ('system_type', models.CharField(choices=[('LINUX', 'Linux'), ('MACOS', 'macOS'), ('RASPBERRY', 'Raspberry Pi')], max_length=50)),
                 ('cpu_model', models.CharField(blank=True, max_length=255)),
@@ -76,7 +79,10 @@ class Migration(migrations.Migration):
                 ('storage_device', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='metrics', to='system.storagedevice')),
             ],
             options={
-                'indexes': [models.Index(fields=['timestamp'], name='system_metr_timesta_ef6d0f_idx'), models.Index(fields=['host', 'metric_type', 'timestamp'], name='system_metr_host_id_c60192_idx')],
+                'indexes': [
+                    models.Index(fields=['timestamp'], name='system_metr_timesta_898d1b_idx'),
+                    models.Index(fields=['host', 'metric_type', 'timestamp'], name='system_metr_host_id_aa5f0f_idx'),
+                ],
             },
         ),
     ]
