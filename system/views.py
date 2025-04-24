@@ -30,13 +30,19 @@ def get_hosts(request):
         # Use the current_status property to determine active status
         is_active = host.current_status
         
-        # Include the new fields in the response
+        # Make sure we print detailed debugging for each host
+        print(f"DEBUG: API returning host {host.hostname}: " 
+              f"client_id={host.client_id}, "
+              f"short_name='{host.short_name}', "
+              f"description='{host.description}'")
+        
+        # Include all fields in the response
         host_data = {
             'id': str(host.id),
             'hostname': host.hostname,
-            'client_id': str(host.client_id) if host.client_id else None,  # Add client_id
-            'short_name': host.short_name,  # Add short_name
-            'description': host.description,  # Add description
+            'client_id': str(host.client_id) if host.client_id else None,
+            'short_name': host.short_name,
+            'description': host.description,
             'system_type': host.system_type,
             'ip_address': host.ip_address,
             'is_active': is_active,
