@@ -40,7 +40,14 @@ class Host(models.Model):
             return False
             
         # Consider hosts inactive if not seen in the last hour
-        return (timezone.now() - self.last_seen) < timedelta(hours=1)
+        time_since_last_seen = timezone.now() - self.last_seen
+        is_active = time_since_last_seen < timedelta(hours=1)
+        
+        # Debug info to help diagnose
+        hours = time_since_last_seen.total_seconds() / 3600
+        print(f"DEBUG: Host {self.hostname} last seen {hours:.2f} hours ago, status: {'active' if is_active else 'inactive'}")
+        
+        return is_active
     
     def __str__(self):
         return f"{self.hostname} ({self.get_system_type_display()})"

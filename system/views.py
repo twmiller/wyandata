@@ -27,14 +27,21 @@ def get_hosts(request):
     hosts_data = []
     
     for host in hosts:
-        # Use the current_status property instead of the is_active field
+        # Use the current_status property to determine active status
+        is_active = host.current_status
+        
+        # Include the new fields in the response
         host_data = {
             'id': str(host.id),
             'hostname': host.hostname,
+            'client_id': str(host.client_id) if host.client_id else None,  # Add client_id
+            'short_name': host.short_name,  # Add short_name
+            'description': host.description,  # Add description
             'system_type': host.system_type,
             'ip_address': host.ip_address,
-            'is_active': host.current_status,  # Use the property instead of the field
+            'is_active': is_active,
             'last_seen': host.last_seen.isoformat() if host.last_seen else None,
+            'last_seen_ago': f"{(timezone.now() - host.last_seen).total_seconds() / 60:.1f} minutes ago" if host.last_seen else "Never",
         }
         hosts_data.append(host_data)
     
@@ -101,10 +108,13 @@ def get_host_details(request, host_id):
             'is_up': interface.is_up,
         })
     
-    # Build the detailed response
+    # Build the detailed response with all fields
     host_details = {
         'id': str(host.id),
         'hostname': host.hostname,
+        'client_id': str(host.client_id) if host.client_id else None,  # Add client_id
+        'short_name': host.short_name,  # Add short_name
+        'description': host.description,  # Add description
         'system_type': host.system_type,
         'ip_address': host.ip_address,
         'cpu_model': host.cpu_model,
@@ -112,8 +122,9 @@ def get_host_details(request, host_id):
         'ram_total': host.ram_total,
         'gpu_model': host.gpu_model,
         'os_version': host.os_version,
-        'is_active': host.current_status,  # Use the property instead of the field
+        'is_active': host.current_status,  # Use the property
         'last_seen': host.last_seen.isoformat() if host.last_seen else None,
+        'last_seen_ago': f"{(timezone.now() - host.last_seen).total_seconds() / 60:.1f} minutes ago" if host.last_seen else "Never",
         'storage_devices': storage_devices,
         'network_interfaces': network_interfaces,
     }
