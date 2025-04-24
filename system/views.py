@@ -27,12 +27,13 @@ def get_hosts(request):
     hosts_data = []
     
     for host in hosts:
+        # Use the current_status property instead of the is_active field
         host_data = {
             'id': str(host.id),
             'hostname': host.hostname,
             'system_type': host.system_type,
             'ip_address': host.ip_address,
-            'is_active': host.is_active,
+            'is_active': host.current_status,  # Use the property instead of the field
             'last_seen': host.last_seen.isoformat() if host.last_seen else None,
         }
         hosts_data.append(host_data)
@@ -111,7 +112,7 @@ def get_host_details(request, host_id):
         'ram_total': host.ram_total,
         'gpu_model': host.gpu_model,
         'os_version': host.os_version,
-        'is_active': host.is_active,
+        'is_active': host.current_status,  # Use the property instead of the field
         'last_seen': host.last_seen.isoformat() if host.last_seen else None,
         'storage_devices': storage_devices,
         'network_interfaces': network_interfaces,

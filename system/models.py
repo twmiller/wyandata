@@ -2,6 +2,8 @@
 
 from django.db import models
 import uuid
+from django.utils import timezone
+from datetime import timedelta
 
 class Host(models.Model):
     """Represents a monitored system in the infrastructure"""
@@ -30,6 +32,15 @@ class Host(models.Model):
     # Status tracking
     last_seen = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    
+    @property
+    def current_status(self):
+        """Calculate the current status based on last_seen time"""
+        if not self.last_seen:
+            return False
+            
+        # Consider hosts inactive if not seen in the last hour
+        return (timezone.now() - self.last_seen) < timedelta(hours=1)
     
     def __str__(self):
         return f"{self.hostname} ({self.get_system_type_display()})"
