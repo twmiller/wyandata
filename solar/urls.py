@@ -1,15 +1,16 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from . import views
 
-app_name = 'solar'
+# Create a router for ViewSet
+router = DefaultRouter()
+router.register(r'data', views.SolarDataViewSet, basename='solar-data')
 
 urlpatterns = [
-    # Use the existing view names but update the URL paths to include 'api/'
-    path('api/solar/current/', views.get_current, name='api_current_solar'),
-    path('api/solar/history/', views.get_history, name='api_solar_history'),
-    path('api/solar/daily/', views.get_daily, name='api_daily_solar'),
-    path('api/solar/monthly/', views.get_monthly, name='api_monthly_solar'),
-    path('api/solar/yearly/', views.get_yearly, name='api_yearly_solar'),
-    # Keep the dashboard URL as is
-    path('solar/dashboard/', views.dashboard, name='dashboard'),
+    # API endpoints with /api/solar/ prefix
+    path('api/solar/', include(router.urls)),
+    
+    # Upload and cleanup endpoints
+    path('api/solar/upload/', views.solar_data_upload, name='solar-upload'),
+    path('api/solar/cleanup/', views.cleanup_solar_data, name='solar-cleanup'),
 ]
