@@ -12,6 +12,241 @@ DJANGO_SETTINGS_MODULE=wyandata.settings uvicorn wyandata.asgi:application --hos
 
 ## Applications
 
+### Books
+
+A library management system with OpenLibrary integration for book metadata.
+
+#### Features:
+
+- Track books, authors, genres, and publishers
+- User-specific book collections with reading status tracking
+- Integration with OpenLibrary API for metadata retrieval
+- Comprehensive search capabilities
+
+#### API Endpoints:
+
+**1. Get Books List / Create Book**
+
+- URL: `/books/api/books/`
+- Methods: `GET`, `POST`
+
+**GET**: Retrieves a list of all books in the library.
+- Query Parameters:
+  - `q`: Search query for title, author, or description
+  - `genre`: Filter by genre slug
+- Example response:
+```json
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "title": "The Hitchhiker's Guide to the Galaxy",
+    "slug": "the-hitchhikers-guide-to-the-galaxy",
+    "authors": [
+      {
+        "id": "9d7af3fa-71c5-4049-a9c9-3c78566e9821",
+        "name": "Douglas Adams",
+        "slug": "douglas-adams",
+        "biography": "Douglas Noel Adams was an English author...",
+        "birth_date": "1952-03-11",
+        "death_date": "2001-05-11",
+        "ol_author_key": "OL272947A"
+      }
+    ],
+    "genres": [
+      {
+        "id": "1b19b7fe-9933-4f53-a95c-dd448b8231b7",
+        "name": "Science Fiction",
+        "slug": "science-fiction"
+      },
+      {
+        "id": "94f2ba3a-d54e-4647-bb8d-7ed15b62123c",
+        "name": "Comedy",
+        "slug": "comedy"
+      }
+    ],
+    "publication_date": "1979-10-12",
+    "isbn_10": "0345391802",
+    "isbn_13": "9780345391803",
+    "description": "Seconds before the Earth is demolished...",
+    "cover_image": "/media/book_covers/hitchhiker.jpg",
+    "page_count": 224
+  }
+]
+```
+
+**POST**: Creates a new book.
+- Content Type: `application/json`
+- Example request:
+```json
+{
+  "title": "Project Hail Mary",
+  "description": "A novel about a lone astronaut who must save the earth from disaster",
+  "isbn_13": "9780593135204",
+  "publication_date": "2021-05-04",
+  "publisher_id": "23456789-abcd-1234-ef56-789012345678",
+  "language": "eng",
+  "page_count": 496
+}
+```
+- Notes: 
+  - After creating the book, use separate requests to add authors and genres
+  - The `slug` field is automatically generated from the title
+
+**2. Get Book Details / Update Book / Delete Book**
+
+- URL: `/books/api/books/{book_slug}/`
+- Methods: `GET`, `PUT`, `DELETE`
+
+**GET**: Retrieves detailed information about a specific book.
+- Example response:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "title": "The Hitchhiker's Guide to the Galaxy",
+  "slug": "the-hitchhikers-guide-to-the-galaxy",
+  "authors": [
+    {
+      "id": "9d7af3fa-71c5-4049-a9c9-3c78566e9821",
+      "name": "Douglas Adams",
+      "slug": "douglas-adams",
+      "biography": "Douglas Noel Adams was an English author...",
+      "birth_date": "1952-03-11",
+      "death_date": "2001-05-11",
+      "ol_author_key": "OL272947A"
+    }
+  ],
+  "genres": [
+    {
+      "id": "1b19b7fe-9933-4f53-a95c-dd448b8231b7",
+      "name": "Science Fiction",
+      "slug": "science-fiction"
+    },
+    {
+      "id": "94f2ba3a-d54e-4647-bb8d-7ed15b62123c",
+      "name": "Comedy",
+      "slug": "comedy"
+    }
+  ],
+  "publisher": {
+    "id": "23456789-abcd-1234-ef56-789012345678",
+    "name": "Pan Books",
+    "website": "https://www.panmacmillan.com/"
+  },
+  "publication_date": "1979-10-12",
+  "isbn_10": "0345391802",
+  "isbn_13": "9780345391803",
+  "description": "Seconds before the Earth is demolished...",
+  "cover_image": "/media/book_covers/hitchhiker.jpg",
+  "page_count": 224,
+  "ol_work_key": "OL45883W",
+  "ol_edition_key": "OL22545361M",
+  "language": "eng",
+  "added_date": "2025-04-15T14:22:31.742562",
+  "updated_date": "2025-04-15T14:22:31.742562"
+}
+```
+
+**PUT**: Updates an existing book.
+- Content Type: `application/json`
+- Example request:
+```json
+{
+  "description": "Updated description of the book",
+  "page_count": 512
+}
+```
+- Notes: 
+  - Only provide the fields you want to update
+  - To update authors or genres, include them in the request
+
+**DELETE**: Removes a book.
+- Returns: 204 No Content on success
+
+**3. Get Authors List / Create Author**
+
+- URL: `/books/api/authors/`
+- Methods: `GET`, `POST`
+
+**GET**: Retrieves a list of all authors.
+- Query Parameters:
+  - `q`: Search query for author name
+- Example response:
+```json
+[
+  {
+    "id": "9d7af3fa-71c5-4049-a9c9-3c78566e9821",
+    "name": "Douglas Adams",
+    "slug": "douglas-adams",
+    "biography": "Douglas Noel Adams was an English author...",
+    "birth_date": "1952-03-11",
+    "death_date": "2001-05-11",
+    "ol_author_key": "OL272947A"
+  },
+  {
+    "id": "1b19b7fe-9933-4f53-a95c-dd448b8231b7",
+    "name": "Jane Austen",
+    "slug": "jane-austen",
+    "biography": "Jane Austen was an English novelist...",
+    "birth_date": "1775-12-16",
+    "death_date": "1817-07-18",
+    "ol_author_key": "OL21594A"
+  }
+]
+```
+
+**POST**: Creates a new author.
+- Content Type: `application/json`
+- Example request:
+```json
+{
+  "name": "Andy Weir",
+  "biography": "Andy Weir is an American novelist and former computer programmer.",
+  "birth_date": "1972-06-16"
+}
+```
+- Notes: The `slug` field is automatically generated from the name
+
+**4. Get Author Details / Update Author / Delete Author**
+
+- URL: `/books/api/authors/{author_slug}/`
+- Methods: `GET`, `PUT`, `DELETE`
+
+**GET**: Retrieves detailed information about a specific author.
+- Example response:
+```json
+{
+  "id": "9d7af3fa-71c5-4049-a9c9-3c78566e9821",
+  "name": "Douglas Adams",
+  "slug": "douglas-adams",
+  "biography": "Douglas Noel Adams was an English author...",
+  "birth_date": "1952-03-11",
+  "death_date": "2001-05-11",
+  "ol_author_key": "OL272947A"
+}
+```
+
+**PUT**: Updates an existing author.
+- Content Type: `application/json`
+- Example request:
+```json
+{
+  "biography": "Updated biography for this author",
+  "death_date": "2023-01-01"
+}
+```
+- Notes: Only provide the fields you want to update
+
+**DELETE**: Removes an author.
+- Returns: 204 No Content on success
+
+#### OpenLibrary Integration
+
+The Books app integrates with OpenLibrary API to fetch book metadata:
+
+- Search for books via OpenLibrary
+- Import book details including covers, descriptions, and author information
+- Link books to their OpenLibrary records for additional information
+
 ### Weather
 
 The Weather app collects data from Fineoffset weather stations and sensors.

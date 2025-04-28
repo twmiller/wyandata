@@ -23,4 +23,5 @@ urlpatterns = [
     path('', include('weather.urls')),
     path('', include('solar.urls')),  # Changed to not include 'solar/' prefix since it's in the app's urls.py
     path('', include('system.urls')),  # Changed to not include 'system/' prefix since it's in the app's urls.py
+    path('books/', include('books.urls', namespace='books')),  # Add books app URLs with namespace
 ]

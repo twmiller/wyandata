@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'weather',
     'solar',
     'system',
+    'books',  # Add the books app
 ]
 
 # Channel settings
