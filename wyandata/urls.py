@@ -23,6 +23,5 @@ urlpatterns = [
     path('', include('weather.urls')),
     path('', include('solar.urls')),
     path('', include('system.urls')),
-    path('', include('books.api_urls')),  # Include API endpoints at /api/books/
-    path('books/', include('books.urls', namespace='books')),  # Web views at /books/
+    path('', include('books.urls')),  # Change to include at root level - no /books/ prefix
 ]
