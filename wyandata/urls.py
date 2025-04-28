@@ -19,9 +19,9 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # IMPORTANT: Don't use any prefixes in these paths - they're defined in the app-specific urls.py files
+    # Include app URLs directly
     path('', include('weather.urls')),
-    path('', include('solar.urls')),  # Changed to not include 'solar/' prefix since it's in the app's urls.py
-    path('', include('system.urls')),  # Changed to not include 'system/' prefix since it's in the app's urls.py
-    path('books/', include('books.urls', namespace='books')),  # Add books app URLs with namespace
+    path('', include('solar.urls')),
+    path('', include('system.urls')),
+    path('books/', include('books.urls', namespace='books')),
 ]
