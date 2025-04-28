@@ -23,5 +23,6 @@ urlpatterns = [
     path('', include('weather.urls')),
     path('', include('solar.urls')),
     path('', include('system.urls')),
-    path('books/', include('books.urls', namespace='books')),
+    path('', include('books.api_urls')),  # Include API endpoints at /api/books/
+    path('books/', include('books.urls', namespace='books')),  # Web views at /books/
 ]
