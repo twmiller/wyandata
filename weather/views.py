@@ -251,12 +251,9 @@ def get_current_weather(request):
         # Get the latest outdoor reading
         outdoor_reading = OutdoorWeatherReading.objects.order_by('-time').first()
         
-        # Get the latest indoor reading
-        indoor_reading = IndoorSensor.objects.order_by('-time').first()
-        
         if not outdoor_reading:
             return JsonResponse({'status': 'error', 'message': 'No outdoor weather data available'}, status=404)
-            
+        
         # Format the response data
         data = {
             'status': 'success',
@@ -264,27 +261,12 @@ def get_current_weather(request):
             'outdoor': {
                 'model': outdoor_reading.model,
                 'sensor_id': outdoor_reading.sensor_id,
-                'location': outdoor_reading.location,  # Include source location
+                'location': outdoor_reading.location,
                 'temperature': {
                     'celsius': outdoor_reading.temperature_C,
-                    'fahrenheit': outdoor_reading.temperature_F or outdoor_reading.calculated_temperature_F  # Use provided F if available
+                    'fahrenheit': outdoor_reading.temperature_F or outdoor_reading.calculated_temperature_F
                 },
                 'humidity': outdoor_reading.humidity,
-                'wind': {
-                    'direction_degrees': outdoor_reading.wind_dir_deg,
-                    'direction_cardinal': outdoor_reading.wind_direction_cardinal,
-                    'speed': {
-                        'avg_m_s': outdoor_reading.wind_avg_m_s,
-                        'avg_mph': outdoor_reading.wind_avg_mph,
-                        'max_m_s': outdoor_reading.wind_max_m_s,
-                        'max_mph': outdoor_reading.wind_max_mph
-                    }
-                },
-                'rain': {
-                    'total_mm': outdoor_reading.rain_mm,
-                    'total_inches': outdoor_reading.rain_inches,
-                    'since_previous_inches': outdoor_reading.rainfall_since_previous
-                }
             }
         }
         
@@ -298,26 +280,51 @@ def get_current_weather(request):
         if outdoor_reading.light_lux is not None:
             data['outdoor']['light_lux'] = outdoor_reading.light_lux
         
-        # Add indoor data if available
-        if indoor_reading:
-            data['indoor'] = {
-                'model': indoor_reading.model,
-                'sensor_id': indoor_reading.sensor_id,
-                'location': indoor_reading.location,  # Include source location
-                'temperature': {
-                    'celsius': indoor_reading.temperature_C,
-                    'fahrenheit': indoor_reading.temperature_F or indoor_reading.calculated_temperature_F  # Use provided F if available
-                },
-                'humidity': indoor_reading.humidity,
-                'timestamp': indoor_reading.time.isoformat()
-            }
+        # Get all indoor sensors (latest reading from each unique sensor/channel combination)
+        indoor_sensors_data = []
+        
+        # Track sensor_id/channel combinations we've seen
+        seen_sensors = set()
+        
+        # Get all indoor sensors ordered by time (newest first)
+        for sensor in IndoorSensor.objects.order_by('-time'):
+            # Create a unique key for this sensor based on sensor_id and channel
+            sensor_key = f"{sensor.sensor_id}_{sensor.channel}"
             
-            # Add pressure data if available
-            if hasattr(indoor_reading, 'pressure_hPa') and indoor_reading.pressure_hPa is not None:
-                data['indoor']['pressure'] = {
-                    'hPa': indoor_reading.pressure_hPa,
-                    'inHg': indoor_reading.pressure_inHg
+            # Only include the first (most recent) reading from each unique sensor
+            if sensor_key not in seen_sensors:
+                seen_sensors.add(sensor_key)
+                
+                # Create sensor data dictionary
+                sensor_data = {
+                    'model': sensor.model,
+                    'sensor_id': sensor.sensor_id,
+                    'channel': sensor.channel,
+                    'location': sensor.location,
+                    'temperature': {
+                        'celsius': sensor.temperature_C,
+                        'fahrenheit': sensor.temperature_F or sensor.calculated_temperature_F
+                    },
+                    'humidity': sensor.humidity,
+                    'timestamp': sensor.time.isoformat()
                 }
+                
+                # Add pressure data if available
+                if hasattr(sensor, 'pressure_hPa') and sensor.pressure_hPa is not None:
+                    sensor_data['pressure'] = {
+                        'hPa': sensor.pressure_hPa,
+                        'inHg': sensor.pressure_inHg
+                    }
+                
+                indoor_sensors_data.append(sensor_data)
+        
+        # Add all indoor sensors to the response
+        data['indoor_sensors'] = indoor_sensors_data
+        
+        # For backward compatibility, include the primary indoor sensor separately 
+        # (this should be the first one in our indoor_sensors_data list)
+        if indoor_sensors_data:
+            data['indoor'] = indoor_sensors_data[0]
         
         return JsonResponse(data)
         
