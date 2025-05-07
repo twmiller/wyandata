@@ -52,9 +52,10 @@ class WeatherDataConsumer(AsyncWebsocketConsumer):
                 "outdoor": {
                     "model": outdoor_reading.model,
                     "sensor_id": outdoor_reading.sensor_id,
+                    "location": outdoor_reading.location,  # Include source location
                     "temperature": {
                         "celsius": outdoor_reading.temperature_C,
-                        "fahrenheit": outdoor_reading.temperature_F
+                        "fahrenheit": outdoor_reading.temperature_F or outdoor_reading.calculated_temperature_F  # Use provided F if available
                     },
                     "humidity": outdoor_reading.humidity,
                     "wind": {
@@ -90,9 +91,10 @@ class WeatherDataConsumer(AsyncWebsocketConsumer):
                 data['indoor'] = {
                     "model": indoor_reading.model,
                     "sensor_id": indoor_reading.sensor_id,
+                    "location": indoor_reading.location,  # Include source location
                     "temperature": {
                         "celsius": indoor_reading.temperature_C,
-                        "fahrenheit": indoor_reading.temperature_F
+                        "fahrenheit": indoor_reading.temperature_F or indoor_reading.calculated_temperature_F  # Use provided F if available
                     },
                     "humidity": indoor_reading.humidity,
                     "timestamp": indoor_reading.time.isoformat()
@@ -104,6 +106,40 @@ class WeatherDataConsumer(AsyncWebsocketConsumer):
                         'hPa': indoor_reading.pressure_hPa,
                         'inHg': indoor_reading.pressure_inHg
                     }
+            
+            # Get all secondary indoor sensors (non-main indoor sensor)
+            ambient_sensors = []
+            
+            # Get all recent indoor sensors with locations (last reading from each unique sensor/channel combo)
+            if indoor_reading:
+                main_indoor_key = f"{indoor_reading.sensor_id}_{indoor_reading.channel}"
+                
+                # Find additional indoor sensors (including WH31B sensors with locations)
+                recent_sensors = {}
+                for sensor in IndoorSensor.objects.filter(location__isnull=False).order_by('-time'):
+                    key = f"{sensor.sensor_id}_{sensor.channel}"
+                    if key != main_indoor_key and key not in recent_sensors:
+                        recent_sensors[key] = sensor
+                
+                # Add each ambient sensor to the data
+                for sensor in recent_sensors.values():
+                    sensor_data = {
+                        "model": sensor.model,
+                        "sensor_id": sensor.sensor_id,
+                        "channel": sensor.channel,
+                        "location": sensor.location,
+                        "temperature": {
+                            "celsius": sensor.temperature_C,
+                            "fahrenheit": sensor.temperature_F or sensor.calculated_temperature_F  # Use provided F if available
+                        },
+                        "humidity": sensor.humidity,
+                        "timestamp": sensor.time.isoformat()
+                    }
+                    ambient_sensors.append(sensor_data)
+            
+            # Add ambient sensors to the response if available
+            if ambient_sensors:
+                data['ambient_sensors'] = ambient_sensors
             
             return data
             

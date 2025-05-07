@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from django.http import JsonResponse
-from .models import OutdoorWeatherReading, IndoorSensor, DailyWeatherSummary, MonthlyWeatherSummary
+from .models import OutdoorWeatherReading, IndoorSensor, DailyWeatherSummary, MonthlyWeatherSummary, AmbientSensor
 from django.views.decorators.csrf import csrf_exempt
 import json
 from datetime import datetime, timedelta, date
@@ -44,7 +44,9 @@ def receive_weather_data(request):
             sensor_id = data.get('id')
             battery_ok = bool(data.get('battery_ok', 1))
             temperature_c = data.get('temperature_C')
+            temperature_f = data.get('temperature_F')  # Get source temperature_F
             humidity = data.get('humidity')
+            location = data.get('location')  # Get source location
             
             # Process based on model type
             if 'WH24' in model or 'WH65' in model:
@@ -55,7 +57,9 @@ def receive_weather_data(request):
                     sensor_id=sensor_id,
                     battery_ok=battery_ok,
                     temperature_C=temperature_c,
+                    temperature_F=temperature_f,  # Store provided temperature_F
                     humidity=humidity,
+                    location=location,  # Store provided location
                     wind_dir_deg=data.get('wind_dir_deg'),
                     wind_avg_m_s=data.get('wind_avg_m_s'),
                     wind_max_m_s=data.get('wind_max_m_s'),
@@ -79,9 +83,10 @@ def receive_weather_data(request):
                     "outdoor": {
                         "model": reading.model,
                         "sensor_id": reading.sensor_id,
+                        "location": reading.location,  # Include source location
                         "temperature": {
                             "celsius": reading.temperature_C,
-                            "fahrenheit": reading.temperature_F
+                            "fahrenheit": reading.temperature_F or reading.calculated_temperature_F  # Use provided F if available
                         },
                         "humidity": reading.humidity,
                         "wind": {
@@ -117,9 +122,10 @@ def receive_weather_data(request):
                     ws_data['indoor'] = {
                         "model": indoor_reading.model,
                         "sensor_id": indoor_reading.sensor_id,
+                        "location": indoor_reading.location,  # Include source location
                         "temperature": {
                             "celsius": indoor_reading.temperature_C,
-                            "fahrenheit": indoor_reading.temperature_F
+                            "fahrenheit": indoor_reading.temperature_F or indoor_reading.calculated_temperature_F  # Use provided F if available
                         },
                         "humidity": indoor_reading.humidity,
                         "timestamp": indoor_reading.time.isoformat()
@@ -133,7 +139,7 @@ def receive_weather_data(request):
                     }
                 )
                 
-            elif 'WN32P' in model or 'WH32B' in model:
+            elif 'WN32P' in model or 'WH32B' in model or 'WH31B' in model or 'AmbientWeather-WH31B' in model:
                 # Create indoor sensor reading
                 reading = IndoorSensor(
                     time=time,
@@ -141,11 +147,22 @@ def receive_weather_data(request):
                     sensor_id=sensor_id,
                     battery_ok=battery_ok,
                     temperature_C=temperature_c,
+                    temperature_F=temperature_f,  # Store provided temperature_F
                     humidity=humidity,
+                    location=location,  # Store provided location
                     channel=data.get('channel'),
-                    pressure_hPa=data.get('pressure_hPa'),  # Add pressure data
+                    pressure_hPa=data.get('pressure_hPa'),
                     mic=data.get('mic')
                 )
+                
+                # Set location for specific indoor sensors if no location was provided
+                if not location and ('WH31B' in model or 'AmbientWeather-WH31B' in model):
+                    # Map sensor_id and channel to location
+                    if sensor_id == 238 and data.get('channel') == 1:
+                        reading.location = "First location"
+                    elif sensor_id == 232 and data.get('channel') == 3:
+                        reading.location = "Garden Shed"
+                
                 reading.save()
                 
                 # Get the latest outdoor reading
@@ -161,9 +178,10 @@ def receive_weather_data(request):
                         "outdoor": {
                             "model": outdoor_reading.model,
                             "sensor_id": outdoor_reading.sensor_id,
+                            "location": outdoor_reading.location,  # Include source location
                             "temperature": {
                                 "celsius": outdoor_reading.temperature_C,
-                                "fahrenheit": outdoor_reading.temperature_F
+                                "fahrenheit": outdoor_reading.temperature_F or outdoor_reading.calculated_temperature_F  # Use provided F if available
                             },
                             "humidity": outdoor_reading.humidity,
                             "wind": {
@@ -185,9 +203,10 @@ def receive_weather_data(request):
                         "indoor": {
                             "model": reading.model,
                             "sensor_id": reading.sensor_id,
+                            "location": reading.location,  # Include source location
                             "temperature": {
                                 "celsius": reading.temperature_C,
-                                "fahrenheit": reading.temperature_F
+                                "fahrenheit": reading.temperature_F or reading.calculated_temperature_F  # Use provided F if available
                             },
                             "humidity": reading.humidity,
                             "timestamp": reading.time.isoformat()
@@ -245,9 +264,10 @@ def get_current_weather(request):
             'outdoor': {
                 'model': outdoor_reading.model,
                 'sensor_id': outdoor_reading.sensor_id,
+                'location': outdoor_reading.location,  # Include source location
                 'temperature': {
                     'celsius': outdoor_reading.temperature_C,
-                    'fahrenheit': outdoor_reading.temperature_F
+                    'fahrenheit': outdoor_reading.temperature_F or outdoor_reading.calculated_temperature_F  # Use provided F if available
                 },
                 'humidity': outdoor_reading.humidity,
                 'wind': {
@@ -283,9 +303,10 @@ def get_current_weather(request):
             data['indoor'] = {
                 'model': indoor_reading.model,
                 'sensor_id': indoor_reading.sensor_id,
+                'location': indoor_reading.location,  # Include source location
                 'temperature': {
                     'celsius': indoor_reading.temperature_C,
-                    'fahrenheit': indoor_reading.temperature_F
+                    'fahrenheit': indoor_reading.temperature_F or indoor_reading.calculated_temperature_F  # Use provided F if available
                 },
                 'humidity': indoor_reading.humidity,
                 'timestamp': indoor_reading.time.isoformat()
@@ -436,9 +457,10 @@ def get_recent_readings(request):
                     'timestamp': reading.time.isoformat(),
                     'model': reading.model,
                     'sensor_id': reading.sensor_id,
+                    'location': reading.location,  # Include source location
                     'temperature': {
                         'celsius': reading.temperature_C,
-                        'fahrenheit': reading.temperature_F
+                        'fahrenheit': reading.temperature_F or reading.calculated_temperature_F  # Use provided F if available
                     },
                     'humidity': reading.humidity,
                     'wind': {

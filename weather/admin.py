@@ -3,10 +3,10 @@ from .models import OutdoorWeatherReading, IndoorSensor, DailyWeatherSummary, Mo
 
 @admin.register(OutdoorWeatherReading)
 class OutdoorWeatherReadingAdmin(admin.ModelAdmin):
-    list_display = ('time', 'model', 'sensor_id', 'temperature_F', 'humidity', 
+    list_display = ('time', 'model', 'sensor_id', 'location', 'temperature_F', 'humidity', 
                     'wind_direction_cardinal', 'wind_avg_mph', 'wind_max_mph', 
                     'rain_inches', 'rainfall_since_previous')
-    list_filter = ('model', 'sensor_id')
+    list_filter = ('model', 'sensor_id', 'location')
     date_hierarchy = 'time'
     search_fields = ('model', 'sensor_id')
     readonly_fields = ('temperature_F', 'wind_avg_mph', 'wind_max_mph', 
@@ -14,10 +14,10 @@ class OutdoorWeatherReadingAdmin(admin.ModelAdmin):
 
 @admin.register(IndoorSensor)
 class IndoorSensorAdmin(admin.ModelAdmin):
-    list_display = ('time', 'model', 'sensor_id', 'temperature_F', 'humidity', 'pressure_hPa', 'battery_ok')
-    list_filter = ('model', 'sensor_id')
+    list_display = ('time', 'model', 'sensor_id', 'location', 'temperature_F', 'humidity', 'pressure_hPa', 'battery_ok')
+    list_filter = ('model', 'sensor_id', 'location')
     date_hierarchy = 'time'
-    search_fields = ('model', 'sensor_id')
+    search_fields = ('model', 'sensor_id', 'location')
     readonly_fields = ('temperature_F', 'pressure_inHg')
 
 @admin.register(DailyWeatherSummary)

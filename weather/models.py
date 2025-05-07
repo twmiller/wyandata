@@ -8,14 +8,18 @@ class BaseWeatherReading(models.Model):
     sensor_id = models.IntegerField()
     battery_ok = models.BooleanField(default=True)
     temperature_C = models.FloatField(null=True, blank=True)
+    temperature_F = models.FloatField(null=True, blank=True)  # Store source fahrenheit value
     humidity = models.IntegerField(null=True, blank=True)
+    location = models.CharField(max_length=100, null=True, blank=True)  # Add location from source
     mic = models.CharField(max_length=10, null=True, blank=True)
     
     @property
-    def temperature_F(self):
-        """Convert Celsius to Fahrenheit"""
-        if self.temperature_C is not None:
-            return round((self.temperature_C * 9/5) + 32, 1)
+    def calculated_temperature_F(self):
+        """Calculate Fahrenheit from Celsius as a fallback"""
+        if self.temperature_F is not None:
+            return self.temperature_F  # Return the stored Fahrenheit value if available
+        elif self.temperature_C is not None:
+            return round((self.temperature_C * 9/5) + 32, 1)  # Calculate from Celsius
         return None
 
     class Meta:
@@ -86,7 +90,7 @@ class OutdoorWeatherReading(BaseWeatherReading):
         return directions[idx]
 
 class IndoorSensor(BaseWeatherReading):
-    """Model for indoor sensors (WN32P and WH32B)"""
+    """Model for indoor sensors (WN32P, WH32B, and WH31B)"""
     channel = models.IntegerField(null=True, blank=True)
     pressure_hPa = models.FloatField(null=True, blank=True)
     
