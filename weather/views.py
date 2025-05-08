@@ -100,9 +100,17 @@ def receive_weather_data(request):
                             }
                         },
                         "rain": {
-                            "total_mm": reading.rain_mm,
-                            "total_inches": reading.rain_inches,
-                            "since_previous_inches": reading.rainfall_since_previous
+                            "counter": {
+                                "total_mm": reading.rain_mm,
+                                "total_inches": reading.rain_inches,
+                                "description": "Cumulative rainfall counter since station installation or last reset"
+                            },
+                            "recent": {
+                                "since_previous_reading_inches": reading.rainfall_since_previous,
+                                "last_hour_inches": reading.get_rainfall_since(hours=1),
+                                "last_24h_inches": reading.get_rainfall_since(hours=24),
+                                "description": "Rainfall measured over recent time periods"
+                            }
                         }
                     }
                 }
@@ -195,9 +203,17 @@ def receive_weather_data(request):
                                 }
                             },
                             "rain": {
-                                "total_mm": outdoor_reading.rain_mm,
-                                "total_inches": outdoor_reading.rain_inches,
-                                "since_previous_inches": outdoor_reading.rainfall_since_previous
+                                "counter": {
+                                    "total_mm": outdoor_reading.rain_mm,
+                                    "total_inches": outdoor_reading.rain_inches,
+                                    "description": "Cumulative rainfall counter since station installation or last reset"
+                                },
+                                "recent": {
+                                    "since_previous_reading_inches": outdoor_reading.rainfall_since_previous,
+                                    "last_hour_inches": outdoor_reading.get_rainfall_since(hours=1),
+                                    "last_24h_inches": outdoor_reading.get_rainfall_since(hours=24),
+                                    "description": "Rainfall measured over recent time periods"
+                                }
                             }
                         },
                         "indoor": {
@@ -498,10 +514,18 @@ def get_recent_readings(request):
                             'max_mph': reading.wind_max_mph
                         }
                     },
-                    'rain': {
-                        'total_mm': reading.rain_mm,
-                        'total_inches': reading.rain_inches,
-                        'since_previous_inches': reading.rainfall_since_previous
+                    'rain": {
+                        "counter": {
+                            "total_mm": reading.rain_mm,
+                            "total_inches": reading.rain_inches,
+                            "description": "Cumulative rainfall counter since station installation or last reset"
+                        },
+                        "recent": {
+                            "since_previous_reading_inches": reading.rainfall_since_previous,
+                            "last_hour_inches": reading.get_rainfall_since(hours=1),
+                            "last_24h_inches": reading.get_rainfall_since(hours=24),
+                            "description": "Rainfall measured over recent time periods"
+                        }
                     },
                     'uv': reading.uv,
                     'uvi': reading.uvi,
