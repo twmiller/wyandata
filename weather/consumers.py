@@ -30,6 +30,24 @@ class WeatherDataConsumer(AsyncWebsocketConsumer):
         # Close any open database connections
         await database_sync_to_async(close_old_connections)()
 
+    async def receive(self, text_data=None, bytes_data=None):
+        """Handle incoming messages from WebSocket"""
+        if text_data:
+            try:
+                # Try to parse as JSON
+                data = json.loads(text_data)
+                if 'type' in data and data['type'] == 'ping':
+                    # Respond to ping with pong
+                    await self.send(text_data=json.dumps({'type': 'pong'}))
+            except json.JSONDecodeError:
+                # If not JSON, check if it's a ping
+                if text_data == 'ping':
+                    await self.send(text_data='pong')
+        
+        # Handle ping frames automatically (this is the WebSocket protocol ping)
+        if bytes_data == b'\x89\x00':  # Simple ping frame
+            await self.send(bytes_data=b'\x8a\x00')  # Pong response
+
     @database_sync_to_async
     def get_latest_data(self):
         """Get the latest weather data from the database"""
