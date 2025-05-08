@@ -1,3 +1,4 @@
+import logging
 from django.shortcuts import render
 from django.http import JsonResponse
 from .models import OutdoorWeatherReading, IndoorSensor, DailyWeatherSummary, MonthlyWeatherSummary
@@ -8,6 +9,9 @@ from django.utils import timezone
 import pytz
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+
+# Get a logger for this module
+logger = logging.getLogger(__name__)
 
 def weather_dashboard(request):
     """View to display the latest weather data"""
@@ -25,18 +29,14 @@ def receive_weather_data(request):
     """API endpoint to receive weather data from rtl_433"""
     if request.method == 'POST':
         try:
+            logger.info("Weather data received from rtl_433")
             data = json.loads(request.body)
+            logger.debug(f"Received data: {data}")
             
             # Extract common fields
             time_str = data.get('time')
             
             # Parse naive datetime and make it timezone-aware (Mountain Time)
-            naive_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
-            
-            # Use Mountain Time timezone - you can change to 'US/Mountain', 'MST', 'MDT' as appropriate
-            mountain_tz = pytz.timezone('America/Denver')
-            aware_time = mountain_tz.localize(naive_time)
-            
             # Convert to the project's timezone if different (as defined in settings.py)
             time = timezone.localtime(aware_time)
             
@@ -514,7 +514,7 @@ def get_recent_readings(request):
                             'max_mph': reading.wind_max_mph
                         }
                     },
-                    'rain": {
+                    'rain': {  # Fixed the quote mismatch here - was 'rain": {'
                         "counter": {
                             "total_mm": reading.rain_mm,
                             "total_inches": reading.rain_inches,
