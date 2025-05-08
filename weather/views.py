@@ -267,6 +267,29 @@ def get_current_weather(request):
                     'fahrenheit': outdoor_reading.temperature_F or outdoor_reading.calculated_temperature_F
                 },
                 'humidity': outdoor_reading.humidity,
+                'wind': {
+                    'direction_degrees': outdoor_reading.wind_dir_deg,
+                    'direction_cardinal': outdoor_reading.wind_direction_cardinal,
+                    'speed': {
+                        'avg_m_s': outdoor_reading.wind_avg_m_s,
+                        'avg_mph': outdoor_reading.wind_avg_mph,
+                        'max_m_s': outdoor_reading.wind_max_m_s,
+                        'max_mph': outdoor_reading.wind_max_mph
+                    }
+                },
+                'rain': {
+                    'counter': {
+                        'total_mm': outdoor_reading.rain_mm,
+                        'total_inches': outdoor_reading.rain_inches,
+                        'description': 'Cumulative rainfall counter since station installation or last reset'
+                    },
+                    'recent': {
+                        'since_previous_reading_inches': outdoor_reading.rainfall_since_previous,
+                        'last_hour_inches': outdoor_reading.get_rainfall_since(hours=1),
+                        'last_24h_inches': outdoor_reading.get_rainfall_since(hours=24),
+                        'description': 'Rainfall measured over recent time periods'
+                    }
+                }
             }
         }
         
@@ -320,11 +343,6 @@ def get_current_weather(request):
         
         # Add all indoor sensors to the response
         data['indoor_sensors'] = indoor_sensors_data
-        
-        # For backward compatibility, include the primary indoor sensor separately 
-        # (this should be the first one in our indoor_sensors_data list)
-        if indoor_sensors_data:
-            data['indoor'] = indoor_sensors_data[0]
         
         return JsonResponse(data)
         

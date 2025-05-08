@@ -1,5 +1,7 @@
 from django.db import models
 import math
+from django.utils import timezone
+from datetime import timedelta
 
 class BaseWeatherReading(models.Model):
     """Base model for all weather readings"""
@@ -62,21 +64,32 @@ class OutdoorWeatherReading(BaseWeatherReading):
         """Calculate rainfall since the previous reading"""
         if self.rain_mm is None:
             return None
+        
+        try:
+            # Find the previous reading from the same sensor
+            previous = OutdoorWeatherReading.objects.filter(
+                sensor_id=self.sensor_id,
+                model=self.model,
+                time__lt=self.time,
+                rain_mm__isnull=False
+            ).order_by('-time').first()
             
-        # Find the previous reading from the same sensor
-        previous = OutdoorWeatherReading.objects.filter(
-            sensor_id=self.sensor_id,
-            model=self.model,
-            time__lt=self.time,
-            rain_mm__isnull=False
-        ).order_by('-time').first()
-        
-        if previous and previous.rain_mm is not None:
-            # Calculate difference in mm and convert to inches
-            diff_mm = max(0, self.rain_mm - previous.rain_mm)  # Ensure non-negative
-            return round(diff_mm / 25.4, 2)
-        
-        return None
+            if previous and previous.rain_mm is not None:
+                # If current reading is less than previous, assume counter reset
+                if self.rain_mm < previous.rain_mm:
+                    # Just return the current value since we likely had a counter reset
+                    return round(self.rain_mm / 25.4, 2)
+                else:
+                    # Calculate difference in mm and convert to inches
+                    diff_mm = self.rain_mm - previous.rain_mm
+                    return round(diff_mm / 25.4, 2)
+            
+            # If no previous reading, just return the current rain value
+            return round(self.rain_mm / 25.4, 2)
+            
+        except Exception as e:
+            print(f"Error calculating rainfall: {e}")
+            return 0
     
     @property
     def wind_direction_cardinal(self):
@@ -88,6 +101,41 @@ class OutdoorWeatherReading(BaseWeatherReading):
                       'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
         idx = round(self.wind_dir_deg / 22.5) % 16
         return directions[idx]
+    
+    def get_rainfall_since(self, hours=24):
+        """Get rainfall in the last X hours (default 24)"""
+        if self.rain_mm is None:
+            return None
+            
+        try:
+            # Calculate the time window
+            start_time = self.time - timedelta(hours=hours)
+            
+            # Find the earliest reading within our time window
+            earliest = OutdoorWeatherReading.objects.filter(
+                sensor_id=self.sensor_id,
+                model=self.model,
+                time__gte=start_time,
+                time__lt=self.time,
+                rain_mm__isnull=False
+            ).order_by('time').first()
+            
+            if earliest and earliest.rain_mm is not None:
+                # If current reading is less than earliest, assume counter reset
+                if self.rain_mm < earliest.rain_mm:
+                    # In this case, we can't reliably determine rainfall
+                    return None
+                else:
+                    # Calculate difference in mm and convert to inches
+                    diff_mm = self.rain_mm - earliest.rain_mm
+                    return round(diff_mm / 25.4, 2)
+            
+            # If no earlier reading in the time window, return 0
+            return 0
+            
+        except Exception as e:
+            print(f"Error calculating rainfall over time: {e}")
+            return None
 
 class IndoorSensor(BaseWeatherReading):
     """Model for indoor sensors (WN32P, WH32B, and WH31B)"""
@@ -153,8 +201,8 @@ class MonthlyWeatherSummary(models.Model):
     max_temp_c = models.FloatField(null=True, blank=True)
     avg_temp_c = models.FloatField(null=True, blank=True)
     total_rainfall_mm = models.FloatField(null=True, blank=True)
-    rainy_days = models.IntegerField(null=True, blank=True)
     max_wind_speed_mph = models.FloatField(null=True, blank=True)
+    rainy_days = models.IntegerField(null=True, blank=True)
     
     @property
     def min_temp_f(self):
