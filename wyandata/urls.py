@@ -24,4 +24,5 @@ urlpatterns = [
     path('', include('solar.urls')),
     path('', include('system.urls')),
     path('', include('books.urls')),  # Change to include at root level - no /books/ prefix
+    path('', include('satellite.urls')),
 ]
