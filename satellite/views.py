@@ -10,7 +10,8 @@ class EMWINFileViewSet(viewsets.ModelViewSet):
     """ViewSet for EMWIN file API"""
     queryset = EMWINFile.objects.all().order_by('-source_datetime')
     serializer_class = EMWINFileSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    # Remove authentication requirement for internal API
+    permission_classes = [permissions.AllowAny]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['product_id', 'station_id', 'wmo_header', 'parsed', 'has_been_read',
                        'station_country', 'station_state']
