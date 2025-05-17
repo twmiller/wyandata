@@ -77,9 +77,26 @@ class EMWINFile(models.Model):
     message_id = models.CharField(max_length=10)
     version = models.CharField(max_length=5)
     
-    # Related models
-    product = models.ForeignKey(EMWINProduct, on_delete=models.PROTECT, related_name='emwinfiles')
-    station = models.ForeignKey(EMWINStation, on_delete=models.PROTECT, related_name='emwinfiles')
+    # Make the foreign keys nullable with default getters that create the objects if needed
+    def get_default_product():
+        return EMWINProduct.objects.get_or_create(product_id="UNKNOWN")[0]
+        
+    def get_default_station():
+        return EMWINStation.objects.get_or_create(station_id="UNKN")[0]
+    
+    # Related models with defaults
+    product = models.ForeignKey(
+        EMWINProduct, 
+        on_delete=models.PROTECT, 
+        related_name='emwinfiles',
+        default=get_default_product
+    )
+    station = models.ForeignKey(
+        EMWINStation, 
+        on_delete=models.PROTECT, 
+        related_name='emwinfiles',
+        default=get_default_station
+    )
     
     # Timing
     source_datetime = models.DateTimeField(db_index=True)
