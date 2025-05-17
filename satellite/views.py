@@ -3,62 +3,32 @@ from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import EMWINFile
-from .serializers import EMWINFileSerializer
+from django.db.models import Count, Max, Min
+from .models import EMWINFile, EMWINStation, EMWINProduct
+from .serializers import EMWINFileSerializer, EMWINStationSerializer, EMWINProductSerializer
 
 class EMWINFileViewSet(viewsets.ModelViewSet):
     """ViewSet for EMWIN file API"""
     queryset = EMWINFile.objects.all().order_by('-source_datetime')
     serializer_class = EMWINFileSerializer
-    # Remove authentication requirement for internal API
     permission_classes = [permissions.AllowAny]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['product_id', 'station_id', 'wmo_header', 'parsed', 'has_been_read',
-                       'station_country', 'station_state']
-    search_fields = ['filename', 'product_id', 'product_name', 'station_id', 'station_name', 
-                     'preview', 'station_location']
+    filterset_fields = {
+        'product': ['exact'],
+        'station': ['exact'],
+        'wmo_header': ['exact'],
+        'parsed': ['exact'],
+        'has_been_read': ['exact'],
+        'source_datetime': ['gte', 'lte', 'date', 'date__gte', 'date__lte'],
+    }
+    search_fields = ['filename', 'preview', 'product__name', 'product__product_id', 'station__name', 'station__station_id']
     ordering_fields = ['source_datetime', 'last_modified', 'filename', 'size_bytes']
-    
+
     @action(detail=False, methods=['get'])
     def categories(self, request):
         """Return unique product categories"""
-        categories = EMWINFile.objects.values_list('product_category', flat=True).distinct()
+        categories = EMWINProduct.objects.values_list('category', flat=True).distinct()
         return Response(sorted(filter(None, categories)))
-    
-    @action(detail=False, methods=['get'])
-    def stations(self, request):
-        """Return unique stations with counts"""
-        stations = EMWINFile.objects.values('station_id', 'station_name').distinct()
-        station_counts = {}
-        
-        for station in stations:
-            if station['station_id']:
-                count = EMWINFile.objects.filter(station_id=station['station_id']).count()
-                station_counts[station['station_id']] = {
-                    'id': station['station_id'],
-                    'name': station['station_name'],
-                    'count': count
-                }
-                
-        return Response(list(station_counts.values()))
-    
-    @action(detail=False, methods=['get'])
-    def products(self, request):
-        """Return unique product IDs with counts and names"""
-        products = EMWINFile.objects.values('product_id', 'product_name', 'product_category').distinct()
-        product_counts = {}
-        
-        for product in products:
-            if product['product_id']:
-                count = EMWINFile.objects.filter(product_id=product['product_id']).count()
-                product_counts[product['product_id']] = {
-                    'id': product['product_id'],
-                    'name': product['product_name'],
-                    'category': product['product_category'],
-                    'count': count
-                }
-                
-        return Response(list(product_counts.values()))
     
     @action(detail=False, methods=['post'])
     def mark_read(self, request):
@@ -79,3 +49,25 @@ class EMWINFileViewSet(viewsets.ModelViewSet):
             
         updated = EMWINFile.objects.filter(id__in=file_ids).update(has_been_read=False)
         return Response({'updated': updated})
+
+class EMWINStationViewSet(viewsets.ModelViewSet):
+    """ViewSet for EMWIN stations"""
+    queryset = EMWINStation.objects.annotate(
+        file_count=Count('emwinfiles')
+    ).order_by('station_id')
+    serializer_class = EMWINStationSerializer
+    permission_classes = [permissions.AllowAny]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['country', 'state', 'type']
+    search_fields = ['station_id', 'name', 'location']
+
+class EMWINProductViewSet(viewsets.ModelViewSet):
+    """ViewSet for EMWIN products"""
+    queryset = EMWINProduct.objects.annotate(
+        file_count=Count('emwinfiles')
+    ).order_by('product_id')
+    serializer_class = EMWINProductSerializer
+    permission_classes = [permissions.AllowAny]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['category']
+    search_fields = ['product_id', 'name', 'description']

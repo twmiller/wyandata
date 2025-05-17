@@ -2,6 +2,64 @@ from django.db import models
 from django.utils import timezone
 import os
 
+class EMWINStation(models.Model):
+    """Model to store EMWIN station information"""
+    station_id = models.CharField(max_length=10, primary_key=True)
+    name = models.CharField(max_length=100, null=True, blank=True)
+    location = models.CharField(max_length=100, null=True, blank=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    elevation_meters = models.FloatField(null=True, blank=True)
+    type = models.CharField(max_length=100, null=True, blank=True)
+    state = models.CharField(max_length=2, null=True, blank=True)
+    country = models.CharField(max_length=2, null=True, blank=True)
+    last_seen = models.DateTimeField(null=True, blank=True)
+    first_seen = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        verbose_name = 'EMWIN Station'
+        verbose_name_plural = 'EMWIN Stations'
+        ordering = ['station_id']
+    
+    def __str__(self):
+        if self.name:
+            return f"{self.station_id} - {self.name}"
+        return self.station_id
+    
+    @property
+    def has_coordinates(self):
+        """Check if the station has coordinates"""
+        return self.latitude is not None and self.longitude is not None
+    
+    @property
+    def file_count(self):
+        """Return count of files from this station"""
+        return self.emwinfiles.count()
+
+class EMWINProduct(models.Model):
+    """Model to store EMWIN product information"""
+    product_id = models.CharField(max_length=20, primary_key=True)
+    name = models.CharField(max_length=100, null=True, blank=True)
+    category = models.CharField(max_length=100, null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
+    last_seen = models.DateTimeField(null=True, blank=True)
+    first_seen = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        verbose_name = 'EMWIN Product'
+        verbose_name_plural = 'EMWIN Products'
+        ordering = ['product_id']
+    
+    def __str__(self):
+        if self.name:
+            return f"{self.product_id} - {self.name}"
+        return self.product_id
+    
+    @property
+    def file_count(self):
+        """Return count of files with this product"""
+        return self.emwinfiles.count()
+
 class EMWINFile(models.Model):
     """Model to store EMWIN (Emergency Managers Weather Information Network) data files"""
     
@@ -18,7 +76,10 @@ class EMWINFile(models.Model):
     comm_id = models.CharField(max_length=10)
     message_id = models.CharField(max_length=10)
     version = models.CharField(max_length=5)
-    product_id = models.CharField(max_length=20, db_index=True)
+    
+    # Related models
+    product = models.ForeignKey(EMWINProduct, on_delete=models.PROTECT, related_name='emwinfiles')
+    station = models.ForeignKey(EMWINStation, on_delete=models.PROTECT, related_name='emwinfiles')
     
     # Timing
     source_datetime = models.DateTimeField(db_index=True)
@@ -26,21 +87,6 @@ class EMWINFile(models.Model):
     day = models.CharField(max_length=2)
     hour = models.CharField(max_length=2)
     minute = models.CharField(max_length=2)
-    
-    # Product information
-    product_name = models.CharField(max_length=100, null=True, blank=True)
-    product_category = models.CharField(max_length=100, null=True, blank=True)
-    
-    # Station information
-    station_id = models.CharField(max_length=10, db_index=True)
-    station_name = models.CharField(max_length=100, null=True, blank=True)
-    station_location = models.CharField(max_length=100, null=True, blank=True)
-    station_latitude = models.FloatField(null=True, blank=True)
-    station_longitude = models.FloatField(null=True, blank=True)
-    station_elevation_meters = models.FloatField(null=True, blank=True)
-    station_type = models.CharField(max_length=100, null=True, blank=True)
-    station_state = models.CharField(max_length=2, null=True, blank=True)
-    station_country = models.CharField(max_length=2, null=True, blank=True)
     
     # Content
     preview = models.TextField(null=True, blank=True)
@@ -54,8 +100,8 @@ class EMWINFile(models.Model):
     class Meta:
         ordering = ['-source_datetime']
         indexes = [
-            models.Index(fields=['source_datetime', 'product_id']),
-            models.Index(fields=['station_id', 'product_id']),
+            models.Index(fields=['source_datetime', 'product']),
+            models.Index(fields=['station', 'product']),
             models.Index(fields=['wmo_header']),
         ]
         verbose_name = 'EMWIN File'
@@ -85,8 +131,68 @@ class EMWINFile(models.Model):
         """Return the age of the file in hours"""
         delta = timezone.now() - self.source_datetime
         return delta.total_seconds() / 3600
-    
+        
+    @property
+    def product_id(self):
+        """Return product ID for backwards compatibility"""
+        return self.product.product_id if self.product else None
+        
+    @property
+    def product_name(self):
+        """Return product name for backwards compatibility"""
+        return self.product.name if self.product else None
+        
+    @property
+    def product_category(self):
+        """Return product category for backwards compatibility"""
+        return self.product.category if self.product else None
+        
+    @property
+    def station_id(self):
+        """Return station ID for backwards compatibility"""
+        return self.station.station_id if self.station else None
+        
+    @property
+    def station_name(self):
+        """Return station name for backwards compatibility"""
+        return self.station.name if self.station else None
+        
+    @property
+    def station_location(self):
+        """Return station location for backwards compatibility"""
+        return self.station.location if self.station else None
+        
+    @property
+    def station_latitude(self):
+        """Return station latitude for backwards compatibility"""
+        return self.station.latitude if self.station else None
+        
+    @property
+    def station_longitude(self):
+        """Return station longitude for backwards compatibility"""
+        return self.station.longitude if self.station else None
+        
+    @property
+    def station_elevation_meters(self):
+        """Return station elevation for backwards compatibility"""
+        return self.station.elevation_meters if self.station else None
+        
+    @property
+    def station_type(self):
+        """Return station type for backwards compatibility"""
+        return self.station.type if self.station else None
+        
+    @property
+    def station_state(self):
+        """Return station state for backwards compatibility"""
+        return self.station.state if self.station else None
+        
+    @property
+    def station_country(self):
+        """Return station country for backwards compatibility"""
+        return self.station.country if self.station else None
+        
     @property
     def has_coordinates(self):
         """Check if the station has coordinates"""
-        return self.station_latitude is not None and self.station_longitude is not None
+        return self.station and self.station.has_coordinates

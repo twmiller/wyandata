@@ -5,7 +5,7 @@ import pytz
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
-from satellite.models import EMWINFile
+from satellite.models import EMWINFile, EMWINStation, EMWINProduct
 
 class Command(BaseCommand):
     help = 'Process EMWIN files into the database'
@@ -17,13 +17,14 @@ class Command(BaseCommand):
 
     def parse_emwin_filename(self, filename):
         """Parse EMWIN filename to extract metadata"""
-        pattern = r'A_([A-Z0-9]+)([A-Z0-9]+)(\d{6})_C_([A-Z0-9]+)_(\d{14})_([0-9-]+)-(\d+)-([A-Z0-9]+)\.TXT'
+        # The pattern should match: A_ABCN01KWBC170115_C_KWIN_20250517011502_321540-2-STPTPTCN.TXT
+        pattern = r'A_([A-Z0-9]+)([A-Z0-9]{4})(\d{6})_C_([A-Z0-9]+)_(\d{14})_([0-9-]+)-(\d+)-([A-Z0-9]+)\.TXT'
         match = re.match(pattern, filename)
         if not match:
             return None
             
         wmo_header = match.group(1)
-        originator = match.group(2)
+        originator = match.group(2)  # This should be the proper station ID (e.g., KWBC)
         date_code = match.group(3)  # DDHHMI format
         comm_id = match.group(4)
         timestamp = match.group(5)  # YYYYMMDDHHmmss format
@@ -56,7 +57,7 @@ class Command(BaseCommand):
         
         return {
             'wmo_header': wmo_header,
-            'originator': originator,
+            'originator': originator,  # This is the station ID (e.g., KWBC)
             'comm_id': comm_id,
             'message_id': message_id,
             'version': version, 
@@ -87,14 +88,34 @@ class Command(BaseCommand):
         existing_filenames = set(EMWINFile.objects.values_list('filename', flat=True))
         self.stdout.write(f"Found {len(existing_filenames)} existing files in database")
         
-        # Product name/category mapping - could be extended based on actual data
+        # Product name/category mapping - now we'll use the database
         product_info = {
-            'STPTPTCN': {'name': 'Spot Forecast', 'category': 'Forecasts/Analyses'},
-            # Add more known product mappings here
+            product.product_id: {
+                'name': product.name, 
+                'category': product.category
+            } for product in EMWINProduct.objects.all()
         }
         
-        # Station info mapping - could be extended or moved to a separate file
+        # Station info mapping - now we'll use the database
         station_info = {
+            station.station_id: {
+                'name': station.name,
+                'location': station.location,
+                'latitude': station.latitude,
+                'longitude': station.longitude,
+                'elevation_meters': station.elevation_meters,
+                'type': station.type,
+                'state': station.state,
+                'country': station.country
+            } for station in EMWINStation.objects.all()
+        }
+        
+        # Default product/station info for common entries if not in DB
+        default_products = {
+            'STPTPTCN': {'name': 'Spot Forecast', 'category': 'Forecasts/Analyses', 'description': 'Detailed spot forecasts for specific locations or events.'},
+        }
+        
+        default_stations = {
             'KWBC': {
                 'name': 'National Weather Service', 
                 'location': 'Washington, DC',
@@ -105,7 +126,6 @@ class Command(BaseCommand):
                 'state': 'DC',
                 'country': 'US'
             },
-            # Add more station information here
         }
         
         # Process files in batches
@@ -131,27 +151,67 @@ class Command(BaseCommand):
             file_stat = os.stat(file_path)
             file_preview = self.read_file_preview(file_path, preview_length)
             
-            # Get product info if available
-            product_name = product_category = None
-            if parsed['product_id'] in product_info:
-                product_name = product_info[parsed['product_id']]['name']
-                product_category = product_info[parsed['product_id']]['category']
+            # Get or create product
+            product_id = parsed['product_id']
+            now = timezone.now()
             
-            # Get station info if available
-            station_name = station_location = None
-            station_lat = station_lon = station_elev = None
-            station_type = station_state = station_country = None
+            try:
+                product = EMWINProduct.objects.get(product_id=product_id)
+                product.last_seen = now
+                product.save(update_fields=['last_seen'])
+            except EMWINProduct.DoesNotExist:
+                # Create new product
+                defaults = {
+                    'name': None,
+                    'category': None,
+                    'description': None,
+                    'first_seen': now,
+                    'last_seen': now
+                }
+                
+                # Use default info if available
+                if product_id in default_products:
+                    prod_data = default_products[product_id]
+                    defaults['name'] = prod_data.get('name')
+                    defaults['category'] = prod_data.get('category')
+                    defaults['description'] = prod_data.get('description')
+                
+                product = EMWINProduct.objects.create(
+                    product_id=product_id,
+                    **defaults
+                )
             
-            if parsed['originator'] in station_info:
-                station_data = station_info[parsed['originator']]
-                station_name = station_data.get('name')
-                station_location = station_data.get('location')
-                station_lat = station_data.get('latitude')
-                station_lon = station_data.get('longitude')
-                station_elev = station_data.get('elevation_meters')
-                station_type = station_data.get('type')
-                station_state = station_data.get('state')
-                station_country = station_data.get('country')
+            # Get or create station
+            station_id = parsed['originator']
+            
+            try:
+                station = EMWINStation.objects.get(station_id=station_id)
+                station.last_seen = now
+                station.save(update_fields=['last_seen'])
+            except EMWINStation.DoesNotExist:
+                # Create new station
+                defaults = {
+                    'name': None,
+                    'location': None,
+                    'latitude': None,
+                    'longitude': None,
+                    'elevation_meters': None,
+                    'type': None,
+                    'state': None,
+                    'country': None,
+                    'first_seen': now,
+                    'last_seen': now
+                }
+                
+                # Use default info if available
+                if station_id in default_stations:
+                    stn_data = default_stations[station_id]
+                    defaults.update(stn_data)
+                
+                station = EMWINStation.objects.create(
+                    station_id=station_id,
+                    **defaults
+                )
                 
             # Create EMWINFile instance
             emwin_file = EMWINFile(
@@ -165,23 +225,13 @@ class Command(BaseCommand):
                 comm_id=parsed['comm_id'],
                 message_id=parsed['message_id'],
                 version=parsed['version'],
-                product_id=parsed['product_id'],
+                product=product,
+                station=station,
                 source_datetime=parsed['source_datetime'],
                 full_timestamp=parsed['full_timestamp'],
                 day=parsed['day'],
                 hour=parsed['hour'],
                 minute=parsed['minute'],
-                product_name=product_name,
-                product_category=product_category,
-                station_id=parsed['originator'],
-                station_name=station_name,
-                station_location=station_location,
-                station_latitude=station_lat,
-                station_longitude=station_lon,
-                station_elevation_meters=station_elev,
-                station_type=station_type,
-                station_state=station_state,
-                station_country=station_country,
                 preview=file_preview,
                 content_size_bytes=file_stat.st_size,
                 has_been_read=False
