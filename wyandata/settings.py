@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'channels',
     'corsheaders',
     'django_crontab',
+    'django_filters',  # Add django_filters here
     
     # Local apps
     'api.apps.ApiConfig',  # Use the full path to include the AppConfig
