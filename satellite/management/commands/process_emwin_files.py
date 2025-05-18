@@ -2,14 +2,15 @@ import os
 import re
 import logging
 import requests
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 import pytz
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
 from satellite.models import EMWINFile, EMWINStation, EMWINProduct
-from django.db.models import Count
+from django.db.models import Count, Q
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class Command(BaseCommand):
         parser.add_argument('--lookup-stations', action='store_true', help='Try to fetch station information from external APIs')
         parser.add_argument('--lookup-missing-only', action='store_true', help='Only look up stations with missing information')
         parser.add_argument('--lookup-timeout', type=int, default=10, help='Timeout for API requests in seconds')
+        parser.add_argument('--api-rate-limit', type=float, default=0.5, help='Seconds to wait between API calls')
 
     def parse_emwin_filename(self, filename):
         """Parse EMWIN filename to extract metadata"""
@@ -105,16 +107,27 @@ class Command(BaseCommand):
         if not hasattr(self, '_failed_lookups'):
             self._failed_lookups = set()
         
+        # Set up rate limiting if needed
+        if not hasattr(self, '_last_api_call'):
+            self._last_api_call = None
+            
+        # Rate limiting
+        if self._last_api_call is not None:
+            elapsed = time.time() - self._last_api_call
+            if elapsed < self._api_rate_limit:
+                time.sleep(self._api_rate_limit - elapsed)
+        
         # Try NOAA/NWS API for US stations (typically starting with K)
         if station_id.startswith('K') or station_id.startswith('P') or station_id.startswith('T'):
             try:
                 # First try as a regular station
                 url = f"https://api.weather.gov/stations/{station_id}"
+                self._last_api_call = time.time()
                 response = requests.get(url, timeout=timeout, headers={'User-Agent': 'EMWIN-Processor'})
                 
                 if response.status_code == 200:
                     data = response.json()
-                    return {
+                    result = {
                         'name': data.get('name') or data.get('properties', {}).get('name'),
                         'location': f"{data.get('county', '')}, {data.get('state', '')}".strip(', '),
                         'latitude': data.get('geometry', {}).get('coordinates', [None, None])[1],
@@ -124,15 +137,19 @@ class Command(BaseCommand):
                         'state': data.get('state') or data.get('properties', {}).get('state'),
                         'country': 'US'
                     }
+                    return result
                 elif response.status_code == 404 and len(station_id) == 4 and station_id[0] in "KPTNC":
                     # If it's a 4-character ID starting with a regional prefix, try as an office
                     office_id = station_id[1:]  # Remove the prefix
                     url = f"https://api.weather.gov/offices/{office_id}"
+                    # Rate limiting
+                    time.sleep(self._api_rate_limit)
+                    self._last_api_call = time.time()
                     response = requests.get(url, timeout=timeout, headers={'User-Agent': 'EMWIN-Processor'})
                     
                     if response.status_code == 200:
                         data = response.json()
-                        return {
+                        result = {
                             'name': data.get('properties', {}).get('name'),
                             'location': data.get('properties', {}).get('address', {}).get('addressLocality', ''),
                             'latitude': data.get('geometry', {}).get('coordinates', [None, None])[1],
@@ -141,15 +158,19 @@ class Command(BaseCommand):
                             'state': data.get('properties', {}).get('address', {}).get('addressRegion'),
                             'country': 'US'
                         }
+                        return result
                 
                 # If both failed and it might be a radar station, try the radar endpoint
                 if response.status_code == 404:
                     url = f"https://api.weather.gov/radar/stations/{station_id}"
+                    # Rate limiting
+                    time.sleep(self._api_rate_limit)
+                    self._last_api_call = time.time()
                     response = requests.get(url, timeout=timeout, headers={'User-Agent': 'EMWIN-Processor'})
                     
                     if response.status_code == 200:
                         data = response.json()
-                        return {
+                        result = {
                             'name': data.get('properties', {}).get('name'),
                             'location': f"Radar Station - {data.get('properties', {}).get('name', '')}",
                             'latitude': data.get('geometry', {}).get('coordinates', [None, None])[1],
@@ -159,6 +180,7 @@ class Command(BaseCommand):
                             'state': None,  # Radar API doesn't provide state
                             'country': 'US'
                         }
+                        return result
                 
                 # All attempts failed, cache this failed lookup
                 if response.status_code == 404:
@@ -268,6 +290,17 @@ class Command(BaseCommand):
         lookup_stations = options['lookup_stations']
         lookup_missing_only = options['lookup_missing_only']
         lookup_timeout = options['lookup_timeout']
+        self._api_rate_limit = options.get('api_rate_limit', 0.5)  # Default to 0.5s between API calls
+        
+        # Define max_failures variable for station lookup limits
+        max_failures = 500  # Default to 100 failures before disabling lookups
+        
+        # Initialize tracking for failed lookups to avoid retrying within the same run
+        self._failed_lookups = set()
+        self._last_api_call = None
+        
+        # If we're only supposed to look up missing stations, we don't need to pre-load
+        # anything - the database query in the loop will handle this
         
         # Handle clean operations if requested
         if clean or clean_all:
@@ -487,9 +520,12 @@ class Command(BaseCommand):
                         defaults.update(stn_data)
                     
                     # Try to fetch station information from external APIs if requested
-                    if lookup_stations and not all(defaults.values()):
+                    if lookup_stations:
+                        # For lookup_missing_only, we're creating a new station, so it's missing by definition
+                        # No need to check if it has complete info
+                        
                         # Skip lookups if we've hit too many failures
-                        if hasattr(self, '_failed_lookups') and len(self._failed_lookups) > max_failures:
+                        if len(self._failed_lookups) > max_failures:
                             if not hasattr(self, '_notified_lookup_disabled'):
                                 self.stdout.write(self.style.WARNING(
                                     f"Disabled station lookups after {len(self._failed_lookups)} failures"
@@ -502,11 +538,11 @@ class Command(BaseCommand):
                                 for key, value in station_info.items():
                                     if value is not None and (key not in defaults or defaults[key] is None or defaults[key] == ''):
                                         defaults[key] = value
-                    
-                    station = EMWINStation.objects.create(
-                        station_id=station_id,
-                        **defaults
-                    )
+            
+            station = EMWINStation.objects.create(
+                station_id=station_id,
+                **defaults
+            )
                 
                 # Create EMWINFile instance
                 emwin_file = EMWINFile(
