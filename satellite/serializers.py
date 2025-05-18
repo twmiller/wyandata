@@ -2,14 +2,16 @@ from rest_framework import serializers
 from .models import EMWINFile, EMWINStation, EMWINProduct
 
 class EMWINStationSerializer(serializers.ModelSerializer):
-    file_count = serializers.IntegerField(read_only=True)
+    # Use the renamed annotation field instead of the property
+    files_count = serializers.IntegerField(read_only=True)
     
     class Meta:
         model = EMWINStation
         fields = '__all__'
 
 class EMWINProductSerializer(serializers.ModelSerializer):
-    file_count = serializers.IntegerField(read_only=True)
+    # Use the renamed annotation field instead of the property
+    files_count = serializers.IntegerField(read_only=True)
     
     class Meta:
         model = EMWINProduct

@@ -1,9 +1,18 @@
-# Python
+# Python bytecode
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+
+# Distribution / packaging
 build/
 develop-eggs/
 dist/
@@ -19,14 +28,19 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# Django
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-media
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
 
 # Environments
 .env
@@ -37,7 +51,7 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE related
+# IDE files
 .idea/
 .vscode/
 *.swp
@@ -45,29 +59,14 @@ venv.bak/
 *~
 .DS_Store
 
-# Coverage and test reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
+# Django specific
+migrations/
+!migrations/__init__.py
+staticfiles/
 
-# Celery
-celerybeat-schedule
-celerybeat.pid
+# Project specific logs
+logs/
 
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# Project specific
 # Processed EMWIN files
 /processed_lrit/emwin/
 

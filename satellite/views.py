@@ -53,7 +53,7 @@ class EMWINFileViewSet(viewsets.ModelViewSet):
 class EMWINStationViewSet(viewsets.ModelViewSet):
     """ViewSet for EMWIN stations"""
     queryset = EMWINStation.objects.annotate(
-        file_count=Count('emwinfiles')
+        files_count=Count('emwinfiles')
     ).order_by('station_id')
     serializer_class = EMWINStationSerializer
     permission_classes = [permissions.AllowAny]
@@ -64,7 +64,7 @@ class EMWINStationViewSet(viewsets.ModelViewSet):
 class EMWINProductViewSet(viewsets.ModelViewSet):
     """ViewSet for EMWIN products"""
     queryset = EMWINProduct.objects.annotate(
-        file_count=Count('emwinfiles')
+        files_count=Count('emwinfiles')
     ).order_by('product_id')
     serializer_class = EMWINProductSerializer
     permission_classes = [permissions.AllowAny]

@@ -9,6 +9,6 @@ router.register(r'stations', views.EMWINStationViewSet)
 router.register(r'products', views.EMWINProductViewSet)
 
 urlpatterns = [
-    # API endpoints
+    # API endpoints with the prefix specified in the main urls.py
     path('api/satellite/', include(router.urls)),
 ]
