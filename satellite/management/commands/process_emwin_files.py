@@ -1,12 +1,18 @@
 import os
 import re
+import logging
+import requests
 from datetime import datetime
 import pytz
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
+from django.conf import settings
 from satellite.models import EMWINFile, EMWINStation, EMWINProduct
 from django.db.models import Count
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
     help = 'Process EMWIN files into the database'
@@ -20,6 +26,11 @@ class Command(BaseCommand):
         parser.add_argument('--clean', action='store_true', help='Remove all existing EMWIN files before importing')
         parser.add_argument('--clean-all', action='store_true', help='Remove all EMWIN files, products, and stations before importing')
         parser.add_argument('--clean-confirm', action='store_true', help='Confirm clean operation without prompting')
+        
+        # Add station lookup options
+        parser.add_argument('--lookup-stations', action='store_true', help='Try to fetch station information from external APIs')
+        parser.add_argument('--lookup-missing-only', action='store_true', help='Only look up stations with missing information')
+        parser.add_argument('--lookup-timeout', type=int, default=10, help='Timeout for API requests in seconds')
 
     def parse_emwin_filename(self, filename):
         """Parse EMWIN filename to extract metadata"""
@@ -83,6 +94,94 @@ class Command(BaseCommand):
         except Exception as e:
             return f"Error reading file: {str(e)}"
     
+    def fetch_station_info(self, station_id, timeout=10):
+        """Fetch station information from external sources"""
+        
+        # Try NOAA/NWS API for US stations (typically starting with K)
+        if station_id.startswith('K'):
+            try:
+                url = f"https://api.weather.gov/stations/{station_id}"
+                response = requests.get(url, timeout=timeout, headers={'User-Agent': 'EMWIN-Processor'})
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        'name': data.get('name'),
+                        'location': f"{data.get('county', '')}, {data.get('state', '')}".strip(', '),
+                        'latitude': data.get('geometry', {}).get('coordinates', [None, None])[1],
+                        'longitude': data.get('geometry', {}).get('coordinates', [None, None])[0],
+                        'elevation_meters': data.get('elevation', {}).get('value'),
+                        'type': 'Weather Station',
+                        'state': data.get('state'),
+                        'country': 'US'
+                    }
+            except Exception as e:
+                logger.warning(f"Error fetching US station {station_id}: {str(e)}")
+        
+        # Try Environment Canada API for Canadian stations (starting with C)
+        if station_id.startswith('C'):
+            try:
+                url = f"https://api.weather.gc.ca/collections/stations/items?STATION_ID={station_id}"
+                response = requests.get(url, timeout=timeout)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('features') and len(data['features']) > 0:
+                        station = data['features'][0]['properties']
+                        return {
+                            'name': station.get('STATION_NAME'),
+                            'location': f"{station.get('MUNICIPALITY')}, {station.get('PROVINCE')}",
+                            'latitude': station.get('LATITUDE'),
+                            'longitude': station.get('LONGITUDE'),
+                            'elevation_meters': station.get('ELEVATION'),
+                            'type': station.get('STATION_TYPE'),
+                            'state': station.get('PROVINCE'),
+                            'country': 'CA'
+                        }
+            except Exception as e:
+                logger.warning(f"Error fetching Canadian station {station_id}: {str(e)}")
+        
+        # Try WMO API for international stations
+        try:
+            url = f"https://api.wmo.int/v1/stations/{station_id}"
+            response = requests.get(url, timeout=timeout)
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    'name': data.get('name'),
+                    'location': data.get('location'),
+                    'latitude': data.get('latitude'),
+                    'longitude': data.get('longitude'),
+                    'elevation_meters': data.get('elevation'),
+                    'type': data.get('type'),
+                    'state': data.get('region'),
+                    'country': data.get('country')
+                }
+        except Exception as e:
+            logger.warning(f"Error fetching WMO station {station_id}: {str(e)}")
+        
+        # Try OpenWeatherMap API as a fallback
+        try:
+            api_key = getattr(settings, 'OPENWEATHERMAP_API_KEY', None)
+            if api_key:
+                url = f"https://api.openweathermap.org/data/2.5/weather?q={station_id}&appid={api_key}"
+                response = requests.get(url, timeout=timeout)
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        'name': data.get('name'),
+                        'location': f"{data.get('name')}, {data.get('sys', {}).get('country')}",
+                        'latitude': data.get('coord', {}).get('lat'),
+                        'longitude': data.get('coord', {}).get('lon'),
+                        'elevation_meters': None,  # Not provided by this API
+                        'type': 'Weather Station',
+                        'state': None,  # Not provided by this API
+                        'country': data.get('sys', {}).get('country')
+                    }
+        except Exception as e:
+            logger.warning(f"Error fetching OpenWeatherMap data for {station_id}: {str(e)}")
+        
+        # Return None if no data found
+        return None
+    
     def handle(self, *args, **options):
         directory = options['directory']
         batch_size = options['batch_size']
@@ -90,6 +189,9 @@ class Command(BaseCommand):
         clean = options['clean']
         clean_all = options['clean_all'] 
         clean_confirm = options['clean_confirm']
+        lookup_stations = options['lookup_stations']
+        lookup_missing_only = options['lookup_missing_only']
+        lookup_timeout = options['lookup_timeout']
         
         # Handle clean operations if requested
         if clean or clean_all:
@@ -303,11 +405,20 @@ class Command(BaseCommand):
                         stn_data = default_stations[station_id]
                         defaults.update(stn_data)
                     
-                    station = EMWINStation.objects.create(
-                        station_id=station_id,
-                        **defaults
-                    )
-                    
+                    # Try to fetch station information from external APIs if requested
+                    if lookup_stations and not all(defaults.values()):
+                        station_info = self.fetch_station_info(station_id, timeout=lookup_timeout)
+                        if station_info:
+                            # Only update fields that are not already set
+                            for key, value in station_info.items():
+                                if value is not None and (key not in defaults or defaults[key] is None or defaults[key] == ''):
+                                    defaults[key] = value
+            
+            station = EMWINStation.objects.create(
+                station_id=station_id,
+                **defaults
+            )
+                
                 # Create EMWINFile instance
                 emwin_file = EMWINFile(
                     filename=filename,
