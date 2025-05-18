@@ -223,9 +223,14 @@ class Command(BaseCommand):
                     deleted_count = EMWINFile.objects.all().delete()[0]
                     self.stdout.write(self.style.SUCCESS(f"{deleted_count} EMWIN files deleted."))
                     
-                    # Clean up unused products and stations
-                    unused_products = EMWINProduct.objects.annotate(file_count=Count('emwinfiles')).filter(file_count=0)
-                    unused_stations = EMWINStation.objects.annotate(file_count=Count('emwinfiles')).filter(file_count=0)
+                    # Clean up unused products and stations - Use a different name for the annotation
+                    unused_products = EMWINProduct.objects.annotate(
+                        files_count=Count('emwinfiles')
+                    ).filter(files_count=0)
+                    
+                    unused_stations = EMWINStation.objects.annotate(
+                        files_count=Count('emwinfiles')
+                    ).filter(files_count=0)
                     
                     product_count = unused_products.count()
                     station_count = unused_stations.count()
