@@ -1,11 +1,17 @@
 from django.shortcuts import render
-from rest_framework import viewsets, permissions, filters
+from rest_framework import viewsets, permissions, filters, pagination
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Count, Max, Min
 from .models import EMWINFile, EMWINStation, EMWINProduct
 from .serializers import EMWINFileSerializer, EMWINStationSerializer, EMWINProductSerializer
+
+class StandardResultsSetPagination(pagination.PageNumberPagination):
+    """Standard pagination for all viewsets"""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 class EMWINFileViewSet(viewsets.ModelViewSet):
     """ViewSet for EMWIN file API"""
@@ -23,6 +29,7 @@ class EMWINFileViewSet(viewsets.ModelViewSet):
     }
     search_fields = ['filename', 'preview', 'product__name', 'product__product_id', 'station__name', 'station__station_id']
     ordering_fields = ['source_datetime', 'last_modified', 'filename', 'size_bytes']
+    pagination_class = StandardResultsSetPagination
 
     @action(detail=False, methods=['get'])
     def categories(self, request):

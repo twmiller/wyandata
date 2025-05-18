@@ -97,6 +97,14 @@ class Command(BaseCommand):
     def fetch_station_info(self, station_id, timeout=10):
         """Fetch station information from external sources"""
         
+        # Skip if we've previously failed for this ID during this run
+        if hasattr(self, '_failed_lookups') and station_id in self._failed_lookups:
+            return None
+            
+        # Ensure we have a place to track failed lookups
+        if not hasattr(self, '_failed_lookups'):
+            self._failed_lookups = set()
+        
         # Try NOAA/NWS API for US stations (typically starting with K)
         if station_id.startswith('K'):
             try:
@@ -114,6 +122,12 @@ class Command(BaseCommand):
                         'state': data.get('state'),
                         'country': 'US'
                     }
+                elif response.status_code == 404:
+                    # Don't log a warning for 404 responses
+                    self._failed_lookups.add(station_id)
+                    return None
+                else:
+                    logger.debug(f"NOAA API returned status {response.status_code} for station {station_id}")
             except Exception as e:
                 logger.warning(f"Error fetching US station {station_id}: {str(e)}")
         
@@ -136,13 +150,27 @@ class Command(BaseCommand):
                             'state': station.get('PROVINCE'),
                             'country': 'CA'
                         }
+                elif response.status_code == 404:
+                    # Don't log a warning for 404 responses
+                    self._failed_lookups.add(station_id)
+                    return None
+                else:
+                    logger.debug(f"Environment Canada API returned status {response.status_code} for station {station_id}")
             except Exception as e:
                 logger.warning(f"Error fetching Canadian station {station_id}: {str(e)}")
         
-        # Try WMO API for international stations
+        # Skip WMO API for stations with known patterns (to reduce unnecessary lookups)
+        if station_id.startswith('K') or station_id.startswith('P') or station_id.startswith('N'):
+            # These are likely US or international station patterns that the WMO API won't have
+            self._failed_lookups.add(station_id)
+            return None
+                
+        # Try WMO API only for station patterns that might be in their database
         try:
             url = f"https://api.wmo.int/v1/stations/{station_id}"
-            response = requests.get(url, timeout=timeout)
+            # Use a shorter timeout for WMO API since it often doesn't resolve
+            wmo_timeout = min(timeout, 5)
+            response = requests.get(url, timeout=wmo_timeout)
             if response.status_code == 200:
                 data = response.json()
                 return {
@@ -155,8 +183,17 @@ class Command(BaseCommand):
                     'state': data.get('region'),
                     'country': data.get('country')
                 }
+            elif response.status_code == 404:
+                # Don't log a warning for 404 responses
+                self._failed_lookups.add(station_id)
+                return None
+        except requests.exceptions.ConnectionError:
+            # Silently cache connection failures to WMO API
+            self._failed_lookups.add(station_id)
+            return None
         except Exception as e:
-            logger.warning(f"Error fetching WMO station {station_id}: {str(e)}")
+            logger.debug(f"Error fetching WMO station {station_id}: {str(e)}")
+            self._failed_lookups.add(station_id)
         
         # Try OpenWeatherMap API as a fallback
         try:
@@ -179,9 +216,10 @@ class Command(BaseCommand):
         except Exception as e:
             logger.warning(f"Error fetching OpenWeatherMap data for {station_id}: {str(e)}")
         
-        # Return None if no data found
+        # Remember this failed lookup for future reference
+        self._failed_lookups.add(station_id)
         return None
-    
+        
     def handle(self, *args, **options):
         directory = options['directory']
         batch_size = options['batch_size']
@@ -412,12 +450,20 @@ class Command(BaseCommand):
                     
                     # Try to fetch station information from external APIs if requested
                     if lookup_stations and not all(defaults.values()):
-                        station_info = self.fetch_station_info(station_id, timeout=lookup_timeout)
-                        if station_info:
-                            # Only update fields that are not already set
-                            for key, value in station_info.items():
-                                if value is not None and (key not in defaults or defaults[key] is None or defaults[key] == ''):
-                                    defaults[key] = value
+                        # Skip lookups if we've hit too many failures
+                        if hasattr(self, '_failed_lookups') and len(self._failed_lookups) > max_failures:
+                            if not hasattr(self, '_notified_lookup_disabled'):
+                                self.stdout.write(self.style.WARNING(
+                                    f"Disabled station lookups after {len(self._failed_lookups)} failures"
+                                ))
+                                self._notified_lookup_disabled = True
+                        else:
+                            station_info = self.fetch_station_info(station_id, timeout=lookup_timeout)
+                            if station_info:
+                                # Only update fields that are not already set
+                                for key, value in station_info.items():
+                                    if value is not None and (key not in defaults or defaults[key] is None or defaults[key] == ''):
+                                        defaults[key] = value
                     
                     station = EMWINStation.objects.create(
                         station_id=station_id,
