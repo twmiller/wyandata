@@ -106,31 +106,69 @@ class Command(BaseCommand):
             self._failed_lookups = set()
         
         # Try NOAA/NWS API for US stations (typically starting with K)
-        if station_id.startswith('K'):
+        if station_id.startswith('K') or station_id.startswith('P') or station_id.startswith('T'):
             try:
+                # First try as a regular station
                 url = f"https://api.weather.gov/stations/{station_id}"
                 response = requests.get(url, timeout=timeout, headers={'User-Agent': 'EMWIN-Processor'})
+                
                 if response.status_code == 200:
                     data = response.json()
                     return {
-                        'name': data.get('name'),
+                        'name': data.get('name') or data.get('properties', {}).get('name'),
                         'location': f"{data.get('county', '')}, {data.get('state', '')}".strip(', '),
                         'latitude': data.get('geometry', {}).get('coordinates', [None, None])[1],
                         'longitude': data.get('geometry', {}).get('coordinates', [None, None])[0],
                         'elevation_meters': data.get('elevation', {}).get('value'),
                         'type': 'Weather Station',
-                        'state': data.get('state'),
+                        'state': data.get('state') or data.get('properties', {}).get('state'),
                         'country': 'US'
                     }
-                elif response.status_code == 404:
-                    # Don't log a warning for 404 responses
+                elif response.status_code == 404 and len(station_id) == 4 and station_id[0] in "KPTNC":
+                    # If it's a 4-character ID starting with a regional prefix, try as an office
+                    office_id = station_id[1:]  # Remove the prefix
+                    url = f"https://api.weather.gov/offices/{office_id}"
+                    response = requests.get(url, timeout=timeout, headers={'User-Agent': 'EMWIN-Processor'})
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        return {
+                            'name': data.get('properties', {}).get('name'),
+                            'location': data.get('properties', {}).get('address', {}).get('addressLocality', ''),
+                            'latitude': data.get('geometry', {}).get('coordinates', [None, None])[1],
+                            'longitude': data.get('geometry', {}).get('coordinates', [None, None])[0],
+                            'type': 'Weather Forecast Office',
+                            'state': data.get('properties', {}).get('address', {}).get('addressRegion'),
+                            'country': 'US'
+                        }
+                
+                # If both failed and it might be a radar station, try the radar endpoint
+                if response.status_code == 404:
+                    url = f"https://api.weather.gov/radar/stations/{station_id}"
+                    response = requests.get(url, timeout=timeout, headers={'User-Agent': 'EMWIN-Processor'})
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        return {
+                            'name': data.get('properties', {}).get('name'),
+                            'location': f"Radar Station - {data.get('properties', {}).get('name', '')}",
+                            'latitude': data.get('geometry', {}).get('coordinates', [None, None])[1],
+                            'longitude': data.get('geometry', {}).get('coordinates', [None, None])[0],
+                            'elevation_meters': data.get('properties', {}).get('elevation'),
+                            'type': 'Weather Radar',
+                            'state': None,  # Radar API doesn't provide state
+                            'country': 'US'
+                        }
+                
+                # All attempts failed, cache this failed lookup
+                if response.status_code == 404:
+                    logger.debug(f"All Weather.gov APIs returned 404 for station {station_id}")
                     self._failed_lookups.add(station_id)
                     return None
-                else:
-                    logger.debug(f"NOAA API returned status {response.status_code} for station {station_id}")
+                
             except Exception as e:
                 logger.warning(f"Error fetching US station {station_id}: {str(e)}")
-        
+
         # Try Environment Canada API for Canadian stations (starting with C)
         if station_id.startswith('C'):
             try:
@@ -195,26 +233,26 @@ class Command(BaseCommand):
             logger.debug(f"Error fetching WMO station {station_id}: {str(e)}")
             self._failed_lookups.add(station_id)
         
-        # Try OpenWeatherMap API as a fallback
-        try:
-            api_key = getattr(settings, 'OPENWEATHERMAP_API_KEY', None)
-            if api_key:
-                url = f"https://api.openweathermap.org/data/2.5/weather?q={station_id}&appid={api_key}"
-                response = requests.get(url, timeout=timeout)
-                if response.status_code == 200:
-                    data = response.json()
-                    return {
-                        'name': data.get('name'),
-                        'location': f"{data.get('name')}, {data.get('sys', {}).get('country')}",
-                        'latitude': data.get('coord', {}).get('lat'),
-                        'longitude': data.get('coord', {}).get('lon'),
-                        'elevation_meters': None,  # Not provided by this API
-                        'type': 'Weather Station',
-                        'state': None,  # Not provided by this API
-                        'country': data.get('sys', {}).get('country')
-                    }
-        except Exception as e:
-            logger.warning(f"Error fetching OpenWeatherMap data for {station_id}: {str(e)}")
+        # # Try OpenWeatherMap API as a fallback
+        # try:
+        #     api_key = getattr(settings, 'OPENWEATHERMAP_API_KEY', None)
+        #     if api_key:
+        #         url = f"https://api.openweathermap.org/data/2.5/weather?q={station_id}&appid={api_key}"
+        #         response = requests.get(url, timeout=timeout)
+        #         if response.status_code == 200:
+        #             data = response.json()
+        #             return {
+        #                 'name': data.get('name'),
+        #                 'location': f"{data.get('name')}, {data.get('sys', {}).get('country')}",
+        #                 'latitude': data.get('coord', {}).get('lat'),
+        #                 'longitude': data.get('coord', {}).get('lon'),
+        #                 'elevation_meters': None,  # Not provided by this API
+        #                 'type': 'Weather Station',
+        #                 'state': None,  # Not provided by this API
+        #                 'country': data.get('sys', {}).get('country')
+        #             }
+        # except Exception as e:
+        #     logger.warning(f"Error fetching OpenWeatherMap data for {station_id}: {str(e)}")
         
         # Remember this failed lookup for future reference
         self._failed_lookups.add(station_id)
