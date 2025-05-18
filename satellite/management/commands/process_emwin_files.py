@@ -2,10 +2,11 @@ import os
 import re
 from datetime import datetime
 import pytz
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 from satellite.models import EMWINFile, EMWINStation, EMWINProduct
+from django.db.models import Count
 
 class Command(BaseCommand):
     help = 'Process EMWIN files into the database'
@@ -14,6 +15,11 @@ class Command(BaseCommand):
         parser.add_argument('directory', type=str, help='Directory containing EMWIN files')
         parser.add_argument('--batch-size', type=int, default=1000, help='Batch size for database inserts')
         parser.add_argument('--preview-length', type=int, default=100, help='Length of content preview')
+        
+        # Add clean flag to remove existing records
+        parser.add_argument('--clean', action='store_true', help='Remove all existing EMWIN files before importing')
+        parser.add_argument('--clean-all', action='store_true', help='Remove all EMWIN files, products, and stations before importing')
+        parser.add_argument('--clean-confirm', action='store_true', help='Confirm clean operation without prompting')
 
     def parse_emwin_filename(self, filename):
         """Parse EMWIN filename to extract metadata"""
@@ -81,8 +87,59 @@ class Command(BaseCommand):
         directory = options['directory']
         batch_size = options['batch_size']
         preview_length = options['preview_length']
+        clean = options['clean']
+        clean_all = options['clean_all'] 
+        clean_confirm = options['clean_confirm']
         
+        # Handle clean operations if requested
+        if clean or clean_all:
+            if not clean_confirm:
+                # Ask for confirmation if not already confirmed
+                file_count = EMWINFile.objects.count()
+                if clean_all:
+                    product_count = EMWINProduct.objects.count()
+                    station_count = EMWINStation.objects.count()
+                    confirm_message = f"This will delete {file_count} EMWIN files, {product_count} products, and {station_count} stations. Are you sure? (y/N): "
+                else:
+                    confirm_message = f"This will delete {file_count} EMWIN files. Are you sure? (y/N): "
+                
+                confirm = input(confirm_message).lower() == 'y'
+                if not confirm:
+                    self.stdout.write(self.style.WARNING("Operation cancelled."))
+                    return
+            
+            # Perform clean operation
+            with transaction.atomic():
+                if clean_all:
+                    self.stdout.write("Deleting all EMWIN data...")
+                    EMWINFile.objects.all().delete()
+                    EMWINProduct.objects.all().delete()
+                    EMWINStation.objects.all().delete()
+                    self.stdout.write(self.style.SUCCESS("All EMWIN data deleted."))
+                else:
+                    self.stdout.write("Deleting EMWIN files...")
+                    deleted_count = EMWINFile.objects.all().delete()[0]
+                    self.stdout.write(self.style.SUCCESS(f"{deleted_count} EMWIN files deleted."))
+                    
+                    # Clean up unused products and stations
+                    unused_products = EMWINProduct.objects.annotate(file_count=Count('emwinfiles')).filter(file_count=0)
+                    unused_stations = EMWINStation.objects.annotate(file_count=Count('emwinfiles')).filter(file_count=0)
+                    
+                    product_count = unused_products.count()
+                    station_count = unused_stations.count()
+                    
+                    if product_count > 0 or station_count > 0:
+                        self.stdout.write("Cleaning up unused products and stations...")
+                        unused_products.delete()
+                        unused_stations.delete()
+                        self.stdout.write(self.style.SUCCESS(f"Deleted {product_count} unused products and {station_count} unused stations."))
+        
+        # Now proceed with file processing
         self.stdout.write(f"Processing EMWIN files in {directory}")
+        
+        # Check if directory exists
+        if not os.path.isdir(directory):
+            raise CommandError(f"Directory {directory} does not exist")
         
         # Get existing filenames for deduplication
         existing_filenames = set(EMWINFile.objects.values_list('filename', flat=True))
@@ -113,6 +170,13 @@ class Command(BaseCommand):
         # Default product/station info for common entries if not in DB
         default_products = {
             'STPTPTCN': {'name': 'Spot Forecast', 'category': 'Forecasts/Analyses', 'description': 'Detailed spot forecasts for specific locations or events.'},
+            'SPCMESO': {'name': 'Mesoscale Discussion', 'category': 'Severe Weather', 'description': 'Storm Prediction Center mesoscale weather discussions'},
+            'SPCSWOD': {'name': 'Day 1 Convective Outlook', 'category': 'Severe Weather', 'description': 'Storm Prediction Center Day 1 Convective Outlook'},
+            'SPCSWOU': {'name': 'Day 2 Convective Outlook', 'category': 'Severe Weather', 'description': 'Storm Prediction Center Day 2 Convective Outlook'},
+            'SPCSWO2': {'name': 'Day 3 Convective Outlook', 'category': 'Severe Weather', 'description': 'Storm Prediction Center Day 3 Convective Outlook'},
+            'SPCSWOX': {'name': 'Day 4-8 Convective Outlook', 'category': 'Severe Weather', 'description': 'Storm Prediction Center Days 4-8 Convective Outlook'},
+            'TCDAT1': {'name': 'Tropical Cyclone Discussion', 'category': 'Tropical Weather', 'description': 'Tropical cyclone discussion from NHC'},
+            'TCPAT1': {'name': 'Tropical Cyclone Public Advisory', 'category': 'Tropical Weather', 'description': 'Tropical cyclone public advisory from NHC'},
         }
         
         default_stations = {
@@ -126,6 +190,26 @@ class Command(BaseCommand):
                 'state': 'DC',
                 'country': 'US'
             },
+            'KNHC': {
+                'name': 'National Hurricane Center', 
+                'location': 'Miami, FL',
+                'latitude': 25.7617,
+                'longitude': -80.1918,
+                'elevation_meters': 2,
+                'type': 'Weather Forecast Office',
+                'state': 'FL',
+                'country': 'US'
+            },
+            'KSPC': {
+                'name': 'Storm Prediction Center', 
+                'location': 'Norman, OK',
+                'latitude': 35.1833,
+                'longitude': -97.4167,
+                'elevation_meters': 357,
+                'type': 'Weather Forecast Office',
+                'state': 'OK',
+                'country': 'US'
+            },
         }
         
         # Process files in batches
@@ -133,123 +217,138 @@ class Command(BaseCommand):
         total_processed = 0
         total_new = 0
         skipped_files = 0
+        error_files = 0
         
-        for filename in os.listdir(directory):
-            if not filename.startswith("A_") or not filename.endswith(".TXT"):
-                continue
-                
+        # Get list of files to process
+        try:
+            file_list = [f for f in os.listdir(directory) if f.startswith("A_") and f.endswith(".TXT")]
+            self.stdout.write(f"Found {len(file_list)} EMWIN files in directory")
+        except Exception as e:
+            raise CommandError(f"Error reading directory: {str(e)}")
+        
+        # Process each file
+        for filename in file_list:
             # Skip if already in database
             if filename in existing_filenames:
                 skipped_files += 1
+                if skipped_files % 1000 == 0:
+                    self.stdout.write(f"Skipped {skipped_files} existing files...")
                 continue
                 
             parsed = self.parse_emwin_filename(filename)
             if not parsed:
+                error_files += 1
                 continue
                 
             file_path = os.path.join(directory, filename)
-            file_stat = os.stat(file_path)
-            file_preview = self.read_file_preview(file_path, preview_length)
-            
-            # Get or create product
-            product_id = parsed['product_id']
-            now = timezone.now()
             
             try:
-                product = EMWINProduct.objects.get(product_id=product_id)
-                product.last_seen = now
-                product.save(update_fields=['last_seen'])
-            except EMWINProduct.DoesNotExist:
-                # Create new product
-                defaults = {
-                    'name': None,
-                    'category': None,
-                    'description': None,
-                    'first_seen': now,
-                    'last_seen': now
-                }
+                file_stat = os.stat(file_path)
+                file_preview = self.read_file_preview(file_path, preview_length)
                 
-                # Use default info if available
-                if product_id in default_products:
-                    prod_data = default_products[product_id]
-                    defaults['name'] = prod_data.get('name')
-                    defaults['category'] = prod_data.get('category')
-                    defaults['description'] = prod_data.get('description')
+                # Get or create product
+                product_id = parsed['product_id']
+                now = timezone.now()
                 
-                product = EMWINProduct.objects.create(
-                    product_id=product_id,
-                    **defaults
+                try:
+                    product = EMWINProduct.objects.get(product_id=product_id)
+                    product.last_seen = now
+                    product.save(update_fields=['last_seen'])
+                except EMWINProduct.DoesNotExist:
+                    # Create new product
+                    defaults = {
+                        'name': None,
+                        'category': None,
+                        'description': None,
+                        'first_seen': now,
+                        'last_seen': now
+                    }
+                    
+                    # Use default info if available
+                    if product_id in default_products:
+                        prod_data = default_products[product_id]
+                        defaults['name'] = prod_data.get('name')
+                        defaults['category'] = prod_data.get('category')
+                        defaults['description'] = prod_data.get('description')
+                    
+                    product = EMWINProduct.objects.create(
+                        product_id=product_id,
+                        **defaults
+                    )
+                
+                # Get or create station
+                station_id = parsed['originator']
+                
+                try:
+                    station = EMWINStation.objects.get(station_id=station_id)
+                    station.last_seen = now
+                    station.save(update_fields=['last_seen'])
+                except EMWINStation.DoesNotExist:
+                    # Create new station
+                    defaults = {
+                        'name': None,
+                        'location': None,
+                        'latitude': None,
+                        'longitude': None,
+                        'elevation_meters': None,
+                        'type': None,
+                        'state': None,
+                        'country': None,
+                        'first_seen': now,
+                        'last_seen': now
+                    }
+                    
+                    # Use default info if available
+                    if station_id in default_stations:
+                        stn_data = default_stations[station_id]
+                        defaults.update(stn_data)
+                    
+                    station = EMWINStation.objects.create(
+                        station_id=station_id,
+                        **defaults
+                    )
+                    
+                # Create EMWINFile instance
+                emwin_file = EMWINFile(
+                    filename=filename,
+                    path=file_path,
+                    size_bytes=file_stat.st_size,
+                    last_modified=datetime.fromtimestamp(file_stat.st_mtime).replace(tzinfo=pytz.UTC),
+                    parsed=True,
+                    wmo_header=parsed['wmo_header'],
+                    originator=parsed['originator'],
+                    comm_id=parsed['comm_id'],
+                    message_id=parsed['message_id'],
+                    version=parsed['version'],
+                    product=product,
+                    station=station,
+                    source_datetime=parsed['source_datetime'],
+                    full_timestamp=parsed['full_timestamp'],
+                    day=parsed['day'],
+                    hour=parsed['hour'],
+                    minute=parsed['minute'],
+                    preview=file_preview,
+                    content_size_bytes=file_stat.st_size,
+                    has_been_read=False
                 )
-            
-            # Get or create station
-            station_id = parsed['originator']
-            
-            try:
-                station = EMWINStation.objects.get(station_id=station_id)
-                station.last_seen = now
-                station.save(update_fields=['last_seen'])
-            except EMWINStation.DoesNotExist:
-                # Create new station
-                defaults = {
-                    'name': None,
-                    'location': None,
-                    'latitude': None,
-                    'longitude': None,
-                    'elevation_meters': None,
-                    'type': None,
-                    'state': None,
-                    'country': None,
-                    'first_seen': now,
-                    'last_seen': now
-                }
                 
-                # Use default info if available
-                if station_id in default_stations:
-                    stn_data = default_stations[station_id]
-                    defaults.update(stn_data)
+                files_to_create.append(emwin_file)
+                total_new += 1
                 
-                station = EMWINStation.objects.create(
-                    station_id=station_id,
-                    **defaults
-                )
+                # Bulk create when batch size is reached
+                if len(files_to_create) >= batch_size:
+                    with transaction.atomic():
+                        EMWINFile.objects.bulk_create(files_to_create)
+                    self.stdout.write(f"Added {len(files_to_create)} files to database")
+                    files_to_create = []
                 
-            # Create EMWINFile instance
-            emwin_file = EMWINFile(
-                filename=filename,
-                path=file_path,
-                size_bytes=file_stat.st_size,
-                last_modified=datetime.fromtimestamp(file_stat.st_mtime).replace(tzinfo=pytz.UTC),
-                parsed=True,
-                wmo_header=parsed['wmo_header'],
-                originator=parsed['originator'],
-                comm_id=parsed['comm_id'],
-                message_id=parsed['message_id'],
-                version=parsed['version'],
-                product=product,
-                station=station,
-                source_datetime=parsed['source_datetime'],
-                full_timestamp=parsed['full_timestamp'],
-                day=parsed['day'],
-                hour=parsed['hour'],
-                minute=parsed['minute'],
-                preview=file_preview,
-                content_size_bytes=file_stat.st_size,
-                has_been_read=False
-            )
+                total_processed += 1
+                if total_processed % 1000 == 0:
+                    self.stdout.write(f"Processed {total_processed} files, added {total_new} new ones, skipped {skipped_files}, errors {error_files}")
             
-            files_to_create.append(emwin_file)
-            total_new += 1
-            
-            # Bulk create when batch size is reached
-            if len(files_to_create) >= batch_size:
-                with transaction.atomic():
-                    EMWINFile.objects.bulk_create(files_to_create)
-                self.stdout.write(f"Added {len(files_to_create)} files to database")
-                files_to_create = []
-            
-            total_processed += 1
-            if total_processed % 10000 == 0:
-                self.stdout.write(f"Processed {total_processed} files, added {total_new} new ones, skipped {skipped_files}...")
+            except Exception as e:
+                self.stdout.write(self.style.ERROR(f"Error processing file {filename}: {str(e)}"))
+                error_files += 1
         
         # Create any remaining files
         if files_to_create:
@@ -260,5 +359,14 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f"Successfully processed {total_processed} files. "
             f"Added {total_new} new files to database. "
-            f"Skipped {skipped_files} existing files."
+            f"Skipped {skipped_files} existing files. "
+            f"Encountered {error_files} errors."
+        ))
+        
+        # Print summary of data in database
+        file_count = EMWINFile.objects.count()
+        product_count = EMWINProduct.objects.count()
+        station_count = EMWINStation.objects.count()
+        self.stdout.write(self.style.SUCCESS(
+            f"Database now contains {file_count} files, {product_count} products, and {station_count} stations."
         ))
