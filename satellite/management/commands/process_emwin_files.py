@@ -538,11 +538,11 @@ class Command(BaseCommand):
                                 for key, value in station_info.items():
                                     if value is not None and (key not in defaults or defaults[key] is None or defaults[key] == ''):
                                         defaults[key] = value
-            
-            station = EMWINStation.objects.create(
-                station_id=station_id,
-                **defaults
-            )
+                    
+                    station = EMWINStation.objects.create(
+                        station_id=station_id,
+                        **defaults
+                    )
                 
                 # Create EMWINFile instance
                 emwin_file = EMWINFile(
