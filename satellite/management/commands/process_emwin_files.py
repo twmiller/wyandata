@@ -33,6 +33,7 @@ class Command(BaseCommand):
         parser.add_argument('--lookup-missing-only', action='store_true', help='Only look up stations with missing information')
         parser.add_argument('--lookup-timeout', type=int, default=10, help='Timeout for API requests in seconds')
         parser.add_argument('--api-rate-limit', type=float, default=0.5, help='Seconds to wait between API calls')
+        parser.add_argument('--max-runtime', type=int, default=0, help='Maximum runtime in minutes (0 for unlimited)')
 
     def parse_emwin_filename(self, filename):
         """Parse EMWIN filename to extract metadata"""
@@ -291,6 +292,11 @@ class Command(BaseCommand):
         lookup_missing_only = options['lookup_missing_only']
         lookup_timeout = options['lookup_timeout']
         self._api_rate_limit = options.get('api_rate_limit', 0.5)  # Default to 0.5s between API calls
+        max_runtime = options.get('max_runtime', 0)  # In minutes
+        
+        # Convert max_runtime to seconds
+        max_runtime_seconds = max_runtime * 60 if max_runtime > 0 else 0
+        start_time = time.time()
         
         # Define max_failures variable for station lookup limits
         max_failures = 500  # Default to 100 failures before disabling lookups
@@ -438,12 +444,40 @@ class Command(BaseCommand):
         # Get list of files to process
         try:
             file_list = [f for f in os.listdir(directory) if f.startswith("A_") and f.endswith(".TXT")]
-            self.stdout.write(f"Found {len(file_list)} EMWIN files in directory")
+            total_files = len(file_list)
+            self.stdout.write(f"Found {total_files} EMWIN files in directory")
+            
+            # Add a progress reporting line
+            self.stdout.write("Starting processing... (this may take some time)")
+            start_time = time.time()
+            last_update = start_time
         except Exception as e:
             raise CommandError(f"Error reading directory: {str(e)}")
         
         # Process each file
-        for filename in file_list:
+        for idx, filename in enumerate(file_list):
+            # Add progress indicator every 5 seconds
+            current_time = time.time()
+            if current_time - last_update > 5:
+                elapsed = current_time - start_time
+                percent_done = (idx / total_files) * 100
+                files_per_second = idx / elapsed if elapsed > 0 else 0
+                est_remaining = (total_files - idx) / files_per_second if files_per_second > 0 else "unknown"
+                
+                if isinstance(est_remaining, float):
+                    hours, remainder = divmod(est_remaining, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    remaining_str = f"{int(hours)}h {int(minutes)}m {int(seconds)}s"
+                else:
+                    remaining_str = est_remaining
+                    
+                self.stdout.write(
+                    f"Progress: {idx}/{total_files} ({percent_done:.1f}%) - "
+                    f"Speed: {files_per_second:.1f} files/sec - "
+                    f"Estimated remaining: {remaining_str}"
+                )
+                last_update = current_time
+
             # Skip if already in database
             if filename in existing_filenames:
                 skipped_files += 1
@@ -584,13 +618,13 @@ class Command(BaseCommand):
             
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f"Error processing file {filename}: {str(e)}"))
-                error_files += 1
-        
-        # Create any remaining files
-        if files_to_create:
-            with transaction.atomic():
-                EMWINFile.objects.bulk_create(files_to_create)
-            self.stdout.write(f"Added final {len(files_to_create)} files to database")
+
+
+
+
+
+
+                EMWINFile.objects.bulk_create(files_to_create)            with transaction.atomic():        if files_to_create:        # Create any remaining files                        error_files += 1            self.stdout.write(f"Added final {len(files_to_create)} files to database")
             
         self.stdout.write(self.style.SUCCESS(
             f"Successfully processed {total_processed} files. "
